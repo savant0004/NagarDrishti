@@ -185,7 +185,7 @@ export function IssueDetailModal({ issue, onClose, onUpdateStatus }: IssueDetail
             <Users className="w-5 h-5 text-cyan-400" />
             <div>
               <p className="text-[11px] text-slate-400">Impacted Citizens</p>
-              <p className="text-sm font-bold font-mono text-slate-100">{(issue.estimatedPopulationImpact || 800).toLocaleString()} / day</p>
+              <p className="text-sm font-bold font-mono text-slate-100">{typeof issue.estimatedPopulationImpact !== 'number' ? 'Not estimated' : issue.estimatedPopulationImpact.toLocaleString()}</p>
             </div>
           </div>
 

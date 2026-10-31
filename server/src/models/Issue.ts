@@ -8,11 +8,18 @@ export type IssueType =
   | 'Water Leakage'
   | 'Traffic Congestion'
   | 'Damaged Sidewalk'
-  | 'Road Obstruction';
+  | 'Road Obstruction'
+  | 'Waterlogging'
+  | 'Road Damage'
+  | 'Other Urban Infrastructure';
 
 export type IssueSeverity = 'Low' | 'Medium' | 'High' | 'Critical';
 export type IssueStatus = 'NEW' | 'VERIFIED' | 'ASSIGNED' | 'IN PROGRESS' | 'RESOLVED';
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export const ISSUE_TYPES: IssueType[] = ['Pothole', 'Broken Streetlight', 'Blocked Drainage', 'Garbage Accumulation', 'Water Leakage', 'Traffic Congestion', 'Damaged Sidewalk', 'Road Obstruction', 'Waterlogging', 'Road Damage', 'Other Urban Infrastructure'];
+export const ISSUE_SEVERITIES: IssueSeverity[] = ['Low', 'Medium', 'High', 'Critical'];
+export const ISSUE_STATUSES: IssueStatus[] = ['NEW', 'VERIFIED', 'ASSIGNED', 'IN PROGRESS', 'RESOLVED'];
+export const RISK_LEVELS: RiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 export interface INearbyInfrastructure {
   schools: number;
@@ -35,7 +42,7 @@ export interface IIssue extends Document {
   priorityScore: number;
   riskLevel: RiskLevel;
   reportsCount: number;
-  estimatedPopulationImpact: number;
+  estimatedPopulationImpact: number | null;
   nearbyInfrastructure: INearbyInfrastructure;
   recommendedAction: string;
   reason: string;
@@ -51,22 +58,26 @@ export interface IIssue extends Document {
   assignedTeam?: string;
   createdAt: Date;
   updatedAt: Date;
+  resolvedAt?: Date | null;
 }
 
 const IssueSchema: Schema = new Schema(
   {
+    id: { type: String, required: true, unique: true },
     title: { type: String, required: true },
     description: { type: String, required: true },
-    type: { type: String, required: true },
-    severity: { type: String, required: true, default: 'Medium' },
-    latitude: { type: Number, required: true },
-    longitude: { type: Number, required: true },
+    type: { type: String, required: true, enum: ISSUE_TYPES },
+    severity: { type: String, required: true, enum: ISSUE_SEVERITIES, default: 'Medium' },
+    latitude: { type: Number, required: true, min: -90, max: 90 },
+    longitude: { type: Number, required: true, min: -180, max: 180 },
     streetName: { type: String, required: true },
-    status: { type: String, required: true, default: 'NEW' },
+    status: { type: String, required: true, enum: ISSUE_STATUSES, default: 'NEW' },
     priorityScore: { type: Number, required: true, default: 50 },
     riskLevel: { type: String, required: true, default: 'MEDIUM' },
-    reportsCount: { type: Number, default: 1 },
-    estimatedPopulationImpact: { type: Number, default: 500 },
+    reportsCount: { type: Number, min: 0, default: 1 },
+    estimatedPopulationImpact: { type: Number, min: 0, default: null },
+    resolvedAt: { type: Date, default: null },
+    isDemo: { type: Boolean, default: false },
     nearbyInfrastructure: {
       schools: { type: Number, default: 0 },
       hospitals: { type: Number, default: 0 },

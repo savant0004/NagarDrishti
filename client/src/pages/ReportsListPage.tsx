@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { api } from '../services/api';
+import { getSocket } from '../services/socket';
 import { ICitizenReport } from '../types';
 import { Link } from 'react-router-dom';
 import { FileText, Search, Clock, ExternalLink, Plus, Filter } from 'lucide-react';
@@ -41,13 +42,19 @@ export function ReportsListPage() {
   const [reports, setReports] = useState<ICitizenReport[]>([]);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     async function load() {
-      const data = await api.getReports();
-      setReports(data);
+      try { const data = await api.getReports(); setReports(data); }
+      catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Unable to load reports.'); }
     }
     load();
+    const socket = getSocket();
+    const upsert = (report: ICitizenReport) => setReports((previous) => [report, ...previous.filter((item) => item.reportId !== report.reportId)]);
+    socket.on('report:created', upsert);
+    socket.on('report:updated', upsert);
+    return () => { socket.off('report:created', upsert); socket.off('report:updated', upsert); };
   }, []);
 
   const filtered = reports.filter((r) => {
@@ -69,6 +76,7 @@ export function ReportsListPage() {
         <Header />
 
         <main className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full">
+          {errorMsg && <div role="alert" className="p-4 bg-red-950/60 border border-red-800 text-red-300 rounded-xl text-xs">{errorMsg}</div>}
           {/* Page Header */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1">
@@ -159,7 +167,7 @@ export function ReportsListPage() {
               <tbody className="divide-y divide-slate-800/80">
                 {filtered.slice(0, 30).map((r) => (
                   <tr key={r.reportId} className="hover:bg-slate-900/50 transition group">
-                    <td className="p-4 font-mono font-bold text-cyan-400 text-[11px]">{r.reportId}</td>
+                    <td className="p-4 font-mono font-bold text-cyan-400 text-[11px]">{r.reportId}{r.isDemo && <span className="ml-2 text-[9px] text-amber-400">SAMPLE</span>}</td>
                     <td className="p-4 font-semibold text-slate-100">{r.issueType}</td>
                     <td className="p-4 text-slate-400 hidden sm:table-cell">{r.streetName}</td>
                     <td className="p-4">

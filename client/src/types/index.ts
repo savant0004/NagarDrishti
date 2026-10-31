@@ -6,12 +6,18 @@ export type IssueType =
   | 'Water Leakage'
   | 'Traffic Congestion'
   | 'Damaged Sidewalk'
-  | 'Road Obstruction';
+  | 'Road Obstruction'
+  | 'Waterlogging'
+  | 'Road Damage'
+  | 'Other Urban Infrastructure';
 
 export type IssueSeverity = 'Low' | 'Medium' | 'High' | 'Critical';
 export type IssueStatus = 'NEW' | 'VERIFIED' | 'ASSIGNED' | 'IN PROGRESS' | 'RESOLVED';
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type ReportStatus = 'Submitted' | 'Under Review' | 'Assigned' | 'In Progress' | 'Resolved';
+export type UserRole = 'citizen' | 'municipal_staff' | 'admin';
+
+export interface IAuthUser { id: string; name: string; email: string; role: UserRole; }
 
 export interface INearbyInfrastructure {
   schools: number;
@@ -22,6 +28,7 @@ export interface INearbyInfrastructure {
 }
 
 export interface IIssue {
+  isDemo?: boolean;
   _id?: string;
   id: string;
   title: string;
@@ -35,7 +42,7 @@ export interface IIssue {
   priorityScore: number;
   riskLevel: RiskLevel;
   reportsCount: number;
-  estimatedPopulationImpact: number;
+  estimatedPopulationImpact: number | null;
   nearbyInfrastructure: INearbyInfrastructure;
   recommendedAction: string;
   reason: string;
@@ -51,9 +58,11 @@ export interface IIssue {
   assignedTeam?: string;
   createdAt: string;
   updatedAt: string;
+  resolvedAt?: string | null;
 }
 
 export interface ICitizenReport {
+  isDemo?: boolean;
   _id?: string;
   reportId: string;
   issueType: IssueType;
@@ -65,12 +74,26 @@ export interface ICitizenReport {
   severity: IssueSeverity;
   status: ReportStatus;
   contactEmail?: string;
+  userId?: string;
+  resolvedAt?: string | null;
   aiAnalysis?: {
+    detected?: boolean;
+    category?: string;
+    description?: string;
+    severity?: IssueSeverity;
+    severityExplanation?: string;
     detectedIssue: string;
+    provider?: 'Groq';
     confidence: number;
     suggestedSeverity: string;
-    isDemo: boolean;
+    evidence?: string[];
+    recommendedAction?: string;
+    modelIdentifier?: string;
+    analyzedAt?: string;
+    requiresHumanReview?: boolean;
+    isDemo?: boolean;
   };
+  aiAnalysisStatus?: 'analyzed' | 'not_analyzed' | 'no_image';
   createdAt: string;
   updatedAt: string;
 }

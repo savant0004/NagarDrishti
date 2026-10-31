@@ -11,6 +11,7 @@ server/dist/
 .env.development.local
 .env.test.local
 .env.production.local
+server/.env
 client/.env.local
 client/.env.production.local
 

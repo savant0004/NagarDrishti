@@ -3,6 +3,7 @@ import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../services/api';
+import { getSocket } from '../services/socket';
 import { ICitizenReport } from '../types';
 import { Search, CheckCircle2, Clock, ShieldCheck, Sparkles, MapPin, AlertCircle } from 'lucide-react';
 
@@ -18,14 +19,12 @@ export function ReportTrackerPage() {
   const fetchReport = async (id: string) => {
     setIsLoading(true);
     setErrorMsg('');
-    const res = await api.getReportById(id);
-    if (res) {
-      setReport(res);
-    } else {
-      setErrorMsg(`Report ID "${id}" not found.`);
-      setReport(null);
-    }
-    setIsLoading(false);
+    try {
+      const res = await api.getReportById(id);
+      if (res) setReport(res);
+      else { setErrorMsg(`Report ID "${id}" not found.`); setReport(null); }
+    } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Unable to load this report.'); setReport(null); }
+    finally { setIsLoading(false); }
   };
 
   useEffect(() => {
@@ -33,6 +32,14 @@ export function ReportTrackerPage() {
       fetchReport(initialId);
     }
   }, [initialId]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const update = (next: ICitizenReport) => { if (next.reportId === inputReportId) setReport(next); };
+    socket.on('report:updated', update);
+    socket.on('report:created', update);
+    return () => { socket.off('report:updated', update); socket.off('report:created', update); };
+  }, [inputReportId]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -183,13 +190,19 @@ export function ReportTrackerPage() {
                         Detected: <strong className="text-slate-100">{report.aiAnalysis.detectedIssue}</strong>
                       </p>
                       <p className="text-slate-300">
-                        Confidence: <strong className="text-cyan-400 font-mono">{report.aiAnalysis.confidence}%</strong>
+                        Confidence: <strong className="text-cyan-400 font-mono">{(report.aiAnalysis.confidence <= 1 ? report.aiAnalysis.confidence * 100 : report.aiAnalysis.confidence).toFixed(0)}%</strong>
                       </p>
                       <p className="text-slate-300">
                         Suggested Severity: <strong className="text-amber-400">{report.aiAnalysis.suggestedSeverity}</strong>
                       </p>
+                      {report.aiAnalysis.description && <p className="text-slate-400">{report.aiAnalysis.description}</p>}
+                      {report.aiAnalysis.recommendedAction && <p className="text-slate-400">Recommended action: {report.aiAnalysis.recommendedAction}</p>}
+                      {report.aiAnalysis.requiresHumanReview && <p className="text-amber-300">Human review requested.</p>}
                     </div>
                   </div>
+                )}
+                {!report.aiAnalysis && report.aiAnalysisStatus === 'not_analyzed' && (
+                  <div className="glass-panel p-6 rounded-2xl text-xs text-amber-300">Image analysis was unavailable when this report was submitted. This report was manually categorized and requires review.</div>
                 )}
               </div>
             </div>

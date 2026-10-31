@@ -1,136 +1,141 @@
 import { Request, Response } from 'express';
+import fs from 'fs/promises';
+import path from 'path';
+import { randomUUID } from 'crypto';
 import { store } from '../services/store';
-import { analyzeUploadedImage } from '../services/aiVisionService';
-import { calculatePriorityScore } from '../services/priorityEngine';
+import { analyzeUploadedImage, getCachedImageAnalysis, validateImageContent, VisionAnalysisError } from '../services/aiVisionService';
+import { IssueType, IssueSeverity } from '../models/Issue';
+import { AuthenticatedRequest } from '../middleware/auth';
 
-export async function getReports(req: Request, res: Response) {
+const validIssueTypes: IssueType[] = ['Pothole', 'Broken Streetlight', 'Blocked Drainage', 'Garbage Accumulation', 'Water Leakage', 'Traffic Congestion', 'Damaged Sidewalk', 'Road Obstruction', 'Waterlogging', 'Road Damage', 'Other Urban Infrastructure'];
+const validSeverities: IssueSeverity[] = ['Low', 'Medium', 'High', 'Critical'];
+const unavailable = (error: any) => String(error?.message || '').includes('DEMO_MODE is disabled') || String(error?.message || '').includes('MongoDB is unavailable');
+const safeAnalysisError = (error: unknown) => {
+  if (error instanceof VisionAnalysisError) {
+    const statuses: Record<VisionAnalysisError['kind'], number> = { not_configured: 503, provider_unavailable: 503, invalid_response: 502, invalid_image: 415, rate_limited: 429, provider_rejected: 502, timeout: 504 };
+    return { status: statuses[error.kind], message: error.message };
+  }
+  return { status: 503, message: 'Image analysis is temporarily unavailable. You can still submit a manually categorized report.' };
+};
+
+export async function getReports(_req: Request, res: Response) {
   try {
     const reports = await store.getReports();
-    return res.json({ success: true, count: reports.length, data: reports });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.json({ success: true, count: reports.length, data: reports, dataSource: store.getMode() });
+  } catch (error: any) {
+    const status = unavailable(error) ? 503 : 500;
+    return res.status(status).json({ success: false, code: status === 503 ? 'DATABASE_UNAVAILABLE' : 'REPORT_READ_FAILED', error: status === 503 ? 'Complaint records are temporarily unavailable.' : 'Unable to retrieve complaints.' });
   }
 }
 
 export async function getReportById(req: Request, res: Response) {
   try {
     const report = await store.getReportById(req.params.id);
-    if (!report) {
-      return res.status(404).json({ success: false, error: 'Report not found' });
-    }
+    if (!report) return res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'Report not found.' });
+    const user = (req as AuthenticatedRequest).authUser!;
+    if (user.role === 'citizen' && String(report.userId) !== user.id) return res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'Report not found.' });
     return res.json({ success: true, data: report });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+  } catch (error: any) {
+    const status = unavailable(error) ? 503 : 500;
+    return res.status(status).json({ success: false, code: status === 503 ? 'DATABASE_UNAVAILABLE' : 'REPORT_READ_FAILED', error: status === 503 ? 'Complaint records are temporarily unavailable.' : 'Unable to retrieve this complaint.' });
+  }
+}
+
+export async function getReportImage(req: Request, res: Response) {
+  try {
+    const report = await store.getReportById(req.params.id);
+    if (!report) return res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'Report not found.' });
+    const user = (req as AuthenticatedRequest).authUser!;
+    if (user.role === 'citizen' && String(report.userId) !== user.id) return res.status(404).json({ success: false, code: 'NOT_FOUND', error: 'Report not found.' });
+    const filename = path.basename(String(report.image || ''));
+    if (!filename || filename === '.' || filename === path.sep) return res.status(404).json({ success: false, code: 'IMAGE_NOT_FOUND', error: 'No image is attached to this report.' });
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.sendFile(filename, { root: path.join(__dirname, '../../uploads') }, (error) => {
+      if (error && !res.headersSent) res.status((error as any).statusCode === 404 ? 404 : 500).json({ success: false, code: 'IMAGE_READ_FAILED', error: 'Unable to retrieve the report image.' });
+    });
+  } catch (error: any) {
+    const status = unavailable(error) ? 503 : 500;
+    return res.status(status).json({ success: false, code: status === 503 ? 'DATABASE_UNAVAILABLE' : 'IMAGE_READ_FAILED', error: status === 503 ? 'Complaint records are temporarily unavailable.' : 'Unable to retrieve the report image.' });
   }
 }
 
 export async function createReport(req: Request, res: Response) {
+  const user = (req as AuthenticatedRequest).authUser!;
+  const { issueType, description, latitude, longitude, streetName, severity, contactEmail } = req.body || {};
+  if (!validIssueTypes.includes(issueType) || typeof description !== 'string' || !description.trim() || description.length > 5000) {
+    return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'Provide a supported issue category and description up to 5000 characters.' });
+  }
+  if (severity && !validSeverities.includes(severity)) return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'Choose a supported severity.' });
+  const reportLat = Number(latitude);
+  const reportLng = Number(longitude);
+  if (latitude === undefined || longitude === undefined || !Number.isFinite(reportLat) || reportLat < -90 || reportLat > 90 || !Number.isFinite(reportLng) || reportLng < -180 || reportLng > 180) {
+    return res.status(400).json({ success: false, code: 'INVALID_COORDINATES', error: 'Latitude must be between -90 and 90 and longitude between -180 and 180.' });
+  }
+  if (streetName !== undefined && (typeof streetName !== 'string' || streetName.trim().length > 200)) return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'Street or location must be 200 characters or fewer.' });
+  if (contactEmail && (typeof contactEmail !== 'string' || contactEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail))) return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'Provide a valid contact email.' });
+  if (req.file) {
+    try { validateImageContent(req.file.buffer, req.file.mimetype); }
+    catch (error) { return res.status(415).json({ success: false, code: 'INVALID_IMAGE', error: error instanceof Error ? error.message : 'Invalid image.' }); }
+  }
+
+  const idempotencyKey = req.header('Idempotency-Key')?.trim();
+  if (idempotencyKey && (idempotencyKey.length > 128 || !/^[\w.-]+$/.test(idempotencyKey))) return res.status(400).json({ success: false, code: 'INVALID_IDEMPOTENCY_KEY', error: 'Invalid idempotency key.' });
+  const aiAnalysis = req.file ? getCachedImageAnalysis(req.file.buffer, req.file.mimetype) : undefined;
+  const imageFilename = req.file ? `${Date.now()}-${randomUUID()}${req.file.mimetype === 'image/jpeg' ? '.jpg' : req.file.mimetype === 'image/png' ? '.png' : '.webp'}` : '';
+  const imagePath = path.join(__dirname, '../../uploads', imageFilename);
+  let imageWritten = false;
   try {
-    const { issueType, description, latitude, longitude, streetName, severity } = req.body;
-    if (!issueType || !description || !latitude || !longitude) {
-      return res.status(400).json({ success: false, error: 'Missing required report fields' });
-    }
-
-    const reportLat = Number(latitude);
-    const reportLng = Number(longitude);
-
-    // AI Analysis check
-    const filename = req.file ? req.file.originalname : (req.body.imageName || '');
-    const aiAnalysis = analyzeUploadedImage(filename, req.file?.mimetype);
-
-    // Check for Issue Clustering (Feature 3: Duplicate Report Detection within ~500m)
-    const allIssues = await store.getIssues();
-    const existingIssue = allIssues.find((i) => {
-      if (i.status === 'RESOLVED') return false;
-      const typeMatch = i.type.toLowerCase() === String(issueType).toLowerCase();
-      const dist = Math.hypot((i.latitude || 0) - reportLat, (i.longitude || 0) - reportLng);
-      return typeMatch && dist <= 0.006;
-    });
-
-    let createdOrUpdatedIssue: any = null;
-    let associatedIssueId = '';
-
-    if (existingIssue) {
-      // Cluster report into existing issue
-      associatedIssueId = existingIssue.id;
-      const newReportsCount = (existingIssue.reportsCount || 1) + 1;
-
-      // Recalculate priority score with increased report count
-      const updatedCalc = calculatePriorityScore({
-        type: existingIssue.type,
-        severity: existingIssue.severity || 'Medium',
-        reportsCount: newReportsCount,
-        estimatedPopulationImpact: existingIssue.estimatedPopulationImpact || 1200,
-        nearbyInfrastructure: existingIssue.nearbyInfrastructure || { schools: 1, hospitals: 0, busStops: 2, residentialCount: 5, commercialCount: 5 },
-      });
-
-      const clusteringExplanation = `Multiple reports from nearby locations (${newReportsCount} citizen reports) were grouped into this infrastructure issue.`;
-
-      createdOrUpdatedIssue = await store.updateIssue(existingIssue.id, {
-        reportsCount: newReportsCount,
-        priorityScore: updatedCalc.priorityScore,
-        riskLevel: updatedCalc.riskLevel,
-        priorityBreakdown: updatedCalc.breakdown,
-        recommendedAction: updatedCalc.recommendedAction,
-        reason: `${updatedCalc.reason} (${clusteringExplanation})`,
-      });
-    } else {
-      // Create a brand new issue
-      const issueTitle = `${issueType} reported on ${streetName || 'City Corridor'}`;
-      createdOrUpdatedIssue = await store.createIssue({
-        title: issueTitle,
-        description: description,
-        type: issueType,
-        severity: severity || aiAnalysis.suggestedSeverity,
-        latitude: reportLat,
-        longitude: reportLng,
-        streetName: streetName || 'General Area',
-        reportsCount: 1,
-        estimatedPopulationImpact: 1200,
-      });
-      associatedIssueId = createdOrUpdatedIssue.id;
-    }
-
+    if (req.file) { await fs.writeFile(imagePath, req.file.buffer, { flag: 'wx' }); imageWritten = true; }
     const reportData = {
-      ...req.body,
-      image: req.file ? `/uploads/${req.file.filename}` : (req.body.image || ''),
-      aiAnalysis,
-      associatedIssueId,
-      status: 'Submitted',
+      issueType,
+      description: description.trim(),
+      latitude: reportLat,
+      longitude: reportLng,
+      streetName: streetName?.trim() || 'General Area',
+      severity: severity || 'Medium',
+      contactEmail: contactEmail || '',
+      userId: user.id,
+      idempotencyKey,
+      image: req.file ? `/uploads/${imageFilename}` : '',
+      aiAnalysis: aiAnalysis ? { ...aiAnalysis, detectedIssue: aiAnalysis.category, suggestedSeverity: aiAnalysis.severity } : undefined,
+      aiAnalysisStatus: aiAnalysis ? 'analyzed' : req.file ? 'not_analyzed' : 'no_image',
     };
-
-    const newReport = await store.createReport(reportData);
-
+    const issueInput = {
+      title: `${issueType} reported on ${streetName?.trim() || 'City Corridor'}`,
+      description: description.trim(),
+      type: issueType,
+      severity: severity || 'Medium',
+      latitude: reportLat,
+      longitude: reportLng,
+      streetName: streetName?.trim() || 'General Area',
+      estimatedPopulationImpact: null,
+      nearbyInfrastructure: { schools: 0, hospitals: 0, busStops: 0, residentialCount: 0, commercialCount: 0 },
+    };
+    const result = await store.createReportAndAssociateIssue(reportData, issueInput);
+    if (result.idempotent && imageWritten) { await fs.unlink(imagePath).catch(() => undefined); imageWritten = false; }
     const io = req.app.get('io');
-    if (io) {
-      io.emit('report:created', newReport);
-      if (existingIssue) {
-        io.emit('issue:updated', createdOrUpdatedIssue);
-      } else {
-        io.emit('issue:created', createdOrUpdatedIssue);
-      }
+    if (io && !result.idempotent) {
+      io.to('staff').emit('report:created', result.report);
+      io.to(`reporter:${user.id}`).emit('report:created', result.report);
+      if (result.issueCreated) io.to('staff').emit('issue:created', result.issue);
+      else io.to('staff').emit('issue:updated', result.issue);
     }
-
-    return res.status(201).json({
-      success: true,
-      data: newReport,
-      createdIssue: createdOrUpdatedIssue,
-      isClustered: !!existingIssue,
-      message: existingIssue
-        ? 'Report grouped into existing nearby infrastructure issue.'
-        : 'New infrastructure issue created.',
-    });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(result.idempotent ? 200 : 201).json({ success: true, data: result.report, dataSource: store.getMode(), createdIssue: result.issue, isClustered: !result.issueCreated, idempotent: result.idempotent });
+  } catch (error: any) {
+    if (imageWritten) await fs.unlink(imagePath).catch(() => undefined);
+    const status = unavailable(error) ? 503 : error?.code === 11000 ? 409 : 500;
+    if (status === 500) console.error(JSON.stringify({ level: 'error', event: 'complaint_creation_failed', errorName: error?.name || 'Error' }));
+    return res.status(status).json({ success: false, code: status === 503 ? 'DATABASE_UNAVAILABLE' : status === 409 ? 'CONFLICT' : 'COMPLAINT_CREATION_FAILED', error: status === 503 ? 'Complaint storage is temporarily unavailable.' : status === 409 ? 'A duplicate complaint request was detected.' : 'Complaint creation failed. Please try again.' });
   }
 }
 
 export async function analyzeImageEndpoint(req: Request, res: Response) {
   try {
-    const filename = req.file ? req.file.originalname : (req.body.filename || 'pothole_sample.jpg');
-    const result = analyzeUploadedImage(filename, req.file?.mimetype);
+    if (!req.file) return res.status(400).json({ success: false, code: 'IMAGE_REQUIRED', error: 'Upload an image file in the photo field.' });
+    const result = await analyzeUploadedImage(req.file.buffer, req.file.mimetype);
     return res.json({ success: true, data: result });
-  } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+  } catch (error: unknown) {
+    const failure = safeAnalysisError(error);
+    return res.status(failure.status).json({ success: false, code: error instanceof VisionAnalysisError ? error.kind.toUpperCase() : 'VISION_UNAVAILABLE', error: failure.message });
   }
 }

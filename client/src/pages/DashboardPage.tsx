@@ -36,13 +36,16 @@ export function DashboardPage() {
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const fetchData = async () => {
     setIsLoading(true);
-    const [iss, str] = await Promise.all([api.getIssues(), api.getStreets()]);
-    setIssues(iss);
-    setStreets(str);
-    setIsLoading(false);
+    setErrorMsg('');
+    try {
+      const [iss, str] = await Promise.all([api.getIssues(), api.getStreets()]);
+      setIssues(iss); setStreets(str);
+    } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Unable to load dashboard data.'); }
+    finally { setIsLoading(false); }
   };
 
   useEffect(() => {
@@ -50,34 +53,41 @@ export function DashboardPage() {
 
     // Listen to real-time events via Socket.IO
     const socket = getSocket();
-    socket.on('issue:created', (newIssue: IIssue) => {
+    const onIssueCreated = (newIssue: IIssue) => {
       setIssues((prev) => [newIssue, ...prev.filter((i) => i.id !== newIssue.id)]);
-    });
+    };
 
-    socket.on('issue:updated', (updated: IIssue) => {
+    const onIssueUpdated = (updated: IIssue) => {
       setIssues((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-      if (selectedIssue?.id === updated.id) {
-        setSelectedIssue(updated);
-      }
-    });
+      setSelectedIssue((previous) => previous?.id === updated.id ? updated : previous);
+    };
 
-    socket.on('data:reseeded', () => {
-      fetchData();
-    });
+    const onIssueDeleted = ({ id }: { id: string }) => {
+      setIssues((prev) => prev.filter((issue) => issue.id !== id));
+      setSelectedIssue((previous) => previous?.id === id ? null : previous);
+    };
+    const onReseeded = () => { void fetchData(); };
+    socket.on('issue:created', onIssueCreated);
+    socket.on('issue:updated', onIssueUpdated);
+    socket.on('issue:deleted', onIssueDeleted);
+    socket.on('data:reseeded', onReseeded);
 
     return () => {
-      socket.off('issue:created');
-      socket.off('issue:updated');
-      socket.off('data:reseeded');
+      socket.off('issue:created', onIssueCreated);
+      socket.off('issue:updated', onIssueUpdated);
+      socket.off('issue:deleted', onIssueDeleted);
+      socket.off('data:reseeded', onReseeded);
     };
   }, []);
 
   const handleUpdateStatus = async (id: string, status: IssueStatus, team?: string) => {
-    const updated = await api.updateIssueStatus(id, status, team);
-    if (updated) {
+    try {
+      const updated = await api.updateIssueStatus(id, status, team);
+      if (updated) {
       setIssues((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
       setSelectedIssue(updated);
-    }
+      }
+    } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Issue status update failed.'); }
   };
 
   const handleReseed = async () => {
@@ -101,8 +111,8 @@ export function DashboardPage() {
     return true;
   });
 
-  const criticalCount = issues.filter((i) => i.riskLevel === 'CRITICAL').length;
-  const highCount = issues.filter((i) => i.riskLevel === 'HIGH').length;
+  const criticalCount = issues.filter((i) => i.status !== 'RESOLVED' && i.riskLevel === 'CRITICAL').length;
+  const highCount = issues.filter((i) => i.status !== 'RESOLVED' && i.riskLevel === 'HIGH').length;
 
   return (
     <div className="flex h-screen w-screen bg-[#060a12] text-slate-100 overflow-hidden font-sans">
@@ -110,6 +120,7 @@ export function DashboardPage() {
 
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
         <Header onSearch={(q) => setSearchQuery(q)} onReseed={handleReseed} />
+        {errorMsg && <div role="alert" className="mx-6 mt-3 p-3 bg-red-950/60 border border-red-800 text-red-300 rounded-lg text-xs">{errorMsg}</div>}
 
         {/* Operations Overview Sub-Header */}
         <div className="h-11 bg-[#091122] border-b border-slate-800/80 px-6 flex items-center justify-between text-xs overflow-x-auto gap-4">
@@ -119,9 +130,10 @@ export function DashboardPage() {
               <span>City Operations Status: <strong className="text-white">Active</strong></span>
             </span>
             <div className="flex items-center gap-4 text-slate-400 font-mono text-[11px]">
-              <span>Active Issues: <strong className="text-cyan-400">{filteredIssues.length}/10</strong></span>
-              <span>Repair Crews: <strong className="text-green-400">6/8 Ready</strong></span>
-              <span>On-Time Dispatch: <strong className="text-amber-400">94.2%</strong></span>
+              <span>Active Issues: <strong className="text-cyan-400">{filteredIssues.length}</strong></span>
+              {issues.some((issue) => issue.isDemo) && <span className="font-bold text-amber-400">DEMO SAMPLE RECORDS</span>}
+              <span>Service fleet telemetry: <strong className="text-slate-400">Not connected</strong></span>
+              <span>Dispatch SLA: <strong className="text-slate-400">Not tracked</strong></span>
             </div>
           </div>
 
@@ -257,7 +269,7 @@ export function DashboardPage() {
                           </span>
                         </div>
                         <p className="font-bold text-slate-100 text-xs leading-snug line-clamp-1">{iss.title}</p>
-                        <p className="text-[10px] text-slate-400">{iss.streetName} • Impact: {(iss.estimatedPopulationImpact || 800).toLocaleString()} people</p>
+                        <p className="text-[10px] text-slate-400">{iss.streetName} • Impact: {typeof iss.estimatedPopulationImpact !== 'number' ? 'not estimated' : `${iss.estimatedPopulationImpact.toLocaleString()} people`}</p>
                         <p className="text-[10px] text-cyan-300 font-semibold italic line-clamp-1">"{iss.recommendedAction}"</p>
                       </div>
                     ))}

@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, AIVisionResult } from '../services/api';
 import { IssueType, IssueSeverity } from '../types';
 import {
   Camera,
@@ -19,6 +19,8 @@ import {
 
 export function CitizenReportPage() {
   const navigate = useNavigate();
+  const idempotencyKey = useRef(crypto.randomUUID());
+  const submissionFingerprint = useRef('');
 
   const [issueType, setIssueType] = useState<IssueType>('Pothole');
   const [description, setDescription] = useState('');
@@ -30,10 +32,13 @@ export function CitizenReportPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [aiResult, setAiResult] = useState<any>(null);
+  const [aiResult, setAiResult] = useState<AIVisionResult | null>(null);
+  const [analysisUnavailable, setAnalysisUnavailable] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedReportId, setSubmittedReportId] = useState<string | null>(null);
+  const [submittedAiStatus, setSubmittedAiStatus] = useState<'analyzed' | 'not_analyzed' | 'no_image' | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const problemTypes: IssueType[] = [
     'Pothole',
@@ -44,26 +49,45 @@ export function CitizenReportPage() {
     'Traffic Congestion',
     'Damaged Sidewalk',
     'Road Obstruction',
+    'Waterlogging',
+    'Road Damage',
+    'Other Urban Infrastructure',
   ];
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      setErrorMsg('');
+      setAiResult(null);
+      setAnalysisUnavailable(false);
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setSelectedFile(null);
+        setImagePreview(null);
+        setErrorMsg('Choose a JPEG, PNG, or WEBP image.');
+        e.target.value = '';
+        return;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        setSelectedFile(null);
+        setImagePreview(null);
+        setErrorMsg('Image must be 8 MB or smaller.');
+        e.target.value = '';
+        return;
+      }
       setSelectedFile(file);
       setImagePreview(URL.createObjectURL(file));
 
       // Trigger AI Scanner
       setIsScanning(true);
-      const result = await api.analyzeImage(file);
-      setAiResult(result);
-      setIsScanning(false);
-
-      if (result.detectedIssue) {
-        setIssueType(result.detectedIssue);
-      }
-      if (result.suggestedSeverity) {
-        setSeverity(result.suggestedSeverity);
-      }
+      try {
+        const result = await api.analyzeImage(file);
+        setAiResult(result);
+        if (result.detected && problemTypes.includes(result.category as IssueType)) setIssueType(result.category as IssueType);
+        if (result.detected) setSeverity(result.severity);
+      } catch (error) {
+        setAnalysisUnavailable(true);
+        setErrorMsg(`${error instanceof Error ? error.message : 'Image analysis failed.'} You can continue by selecting the category and describing the issue manually.`);
+      } finally { setIsScanning(false); }
     }
   };
 
@@ -72,6 +96,13 @@ export function CitizenReportPage() {
     if (!description.trim()) return;
 
     setIsSubmitting(true);
+    setErrorMsg('');
+
+    const fingerprint = JSON.stringify({ issueType, description, streetName, severity, contactEmail, image: selectedFile ? `${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}` : '' });
+    if (submissionFingerprint.current !== fingerprint) {
+      submissionFingerprint.current = fingerprint;
+      idempotencyKey.current = crypto.randomUUID();
+    }
 
     const formData = new FormData();
     formData.append('issueType', issueType);
@@ -86,10 +117,15 @@ export function CitizenReportPage() {
       formData.append('photo', selectedFile);
     }
 
-    const { report } = await api.createReport(formData);
-
-    setIsSubmitting(false);
-    setSubmittedReportId(report.reportId);
+    try {
+      const { report } = await api.createReport(formData, idempotencyKey.current);
+      setSubmittedReportId(report.reportId);
+      setSubmittedAiStatus(report.aiAnalysisStatus || (selectedFile ? 'not_analyzed' : 'no_image'));
+      submissionFingerprint.current = '';
+      idempotencyKey.current = crypto.randomUUID();
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Report submission failed.');
+    } finally { setIsSubmitting(false); }
   };
 
   return (
@@ -120,6 +156,7 @@ export function CitizenReportPage() {
               <div className="space-y-2">
                 <h2 className="text-2xl font-extrabold text-slate-100">Report Submitted Successfully</h2>
                 <p className="text-xs text-slate-400">Your report has been logged into the NagarDrishti Digital Twin.</p>
+                {submittedAiStatus && <p className="text-xs text-slate-400">{submittedAiStatus === 'analyzed' ? 'Image analysis was saved with this report.' : submittedAiStatus === 'not_analyzed' ? 'This report was saved without AI analysis and requires manual review.' : 'No image analysis was requested for this report.'}</p>}
               </div>
 
               <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-xl space-y-1">
@@ -140,8 +177,12 @@ export function CitizenReportPage() {
                 <button
                   onClick={() => {
                     setSubmittedReportId(null);
+                    setSubmittedAiStatus(null);
                     setDescription('');
                     setImagePreview(null);
+                    setSelectedFile(null);
+                    setAiResult(null);
+                    setAnalysisUnavailable(false);
                   }}
                   className="px-6 py-3 glass-panel hover:bg-slate-800 text-slate-200 font-bold text-xs rounded-xl transition"
                 >
@@ -152,6 +193,7 @@ export function CitizenReportPage() {
           ) : (
             /* Main Report Form */
             <form onSubmit={handleSubmit} className="space-y-6">
+              {errorMsg && <div role="alert" className="p-4 bg-red-950/60 border border-red-800 text-red-300 rounded-xl text-xs flex items-center gap-2"><AlertCircle className="w-4 h-4" />{errorMsg}</div>}
               {/* Photo Upload & AI Vision Box */}
               <div className="glass-panel p-6 rounded-2xl space-y-4">
                 <label className="block text-xs font-bold uppercase tracking-wider text-cyan-300">
@@ -176,7 +218,7 @@ export function CitizenReportPage() {
                         <UploadCloud className="w-6 h-6" />
                       </div>
                       <p className="text-xs font-semibold text-slate-200">Drag & drop photo here or click to browse</p>
-                      <p className="text-[11px] text-slate-500">Supports JPG, PNG, WEBP up to 10MB</p>
+                      <p className="text-[11px] text-slate-500">Supports JPG, PNG, WEBP up to 8MB</p>
                     </div>
                   )}
                 </div>
@@ -192,24 +234,29 @@ export function CitizenReportPage() {
                 {aiResult && !isScanning && (
                   <div className="glass-panel-glow p-4 rounded-xl space-y-2 border border-cyan-500/40">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-cyan-300 flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4 text-cyan-400" /> Demo AI Vision Classification
+                        <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-cyan-400" /> Groq Image Analysis
                       </span>
                       <span className="font-mono text-cyan-400 font-bold bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">
-                        {aiResult.confidence}% Confidence
+                        {(aiResult.confidence * 100).toFixed(0)}% Confidence
                       </span>
                     </div>
                     <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-200 pt-1">
                       <div>
-                        Detected Issue: <strong className="text-slate-100">{aiResult.detectedIssue}</strong>
+                        Detected Issue: <strong className="text-slate-100">{aiResult.category}</strong>
                       </div>
                       <div>
-                        Suggested Severity: <strong className="text-amber-400">{aiResult.suggestedSeverity}</strong>
+                        Visual Severity Estimate: <strong className="text-amber-400">{aiResult.severity}</strong>
                       </div>
                     </div>
-                    <p className="text-[11px] text-slate-400 italic pt-1">{aiResult.explanation}</p>
+                    <p className="text-xs text-slate-300">{aiResult.description}</p>
+                    <p className="text-[11px] text-slate-400">Severity basis: {aiResult.severityExplanation}</p>
+                    <p className="text-[11px] text-slate-400">Recommended action: {aiResult.recommendedAction}</p>
+                    {aiResult.evidence.length > 0 && <p className="text-[11px] text-slate-400">Visual evidence: {aiResult.evidence.join(' · ')}</p>}
+                    <p className="text-[11px] text-amber-300">{aiResult.requiresHumanReview ? 'Human review requested.' : 'AI classification; municipal review still applies.'} Visual analysis does not establish actual public safety risk. Please correct the category below if needed.</p>
                   </div>
                 )}
+                {analysisUnavailable && !isScanning && <p role="status" className="text-xs text-amber-300">AI analysis unavailable. This report will be marked as not analyzed; you can still submit it manually.</p>}
               </div>
 
               {/* Form Details */}

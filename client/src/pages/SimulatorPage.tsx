@@ -218,24 +218,24 @@ export function SimulatorPage() {
                         : 'text-green-400'
                     }`}
                   >
-                    {simResult?.drainageRiskLevel || 'LOW'}
+                    {simResult?.drainageRiskLevel || '—'}
                   </p>
                 </div>
 
                 <div className="glass-panel p-3.5 rounded-2xl space-y-1">
                   <p className="text-[11px] text-slate-400">Flood Risk Index</p>
-                  <p className="text-sm font-extrabold font-mono text-cyan-400">{simResult?.floodRiskPercent || 15}%</p>
+                  <p className="text-sm font-extrabold font-mono text-cyan-400">{simResult ? `${simResult.floodRiskPercent}%` : '—'}</p>
                 </div>
 
                 <div className="glass-panel p-3.5 rounded-2xl space-y-1">
                   <p className="text-[11px] text-slate-400">Affected Roads</p>
-                  <p className="text-sm font-extrabold font-mono text-amber-400">{simResult?.affectedRoadsCount || 2} Streets</p>
+                  <p className="text-sm font-extrabold font-mono text-amber-400">{simResult ? `${simResult.affectedRoadsCount} Streets` : '—'}</p>
                 </div>
 
                 <div className="glass-panel p-3.5 rounded-2xl space-y-1">
                   <p className="text-[11px] text-slate-400">Est. Population Impact</p>
                   <p className="text-sm font-extrabold font-mono text-slate-100">
-                    {(simResult?.estimatedPopulationImpact || 2400).toLocaleString()}
+                    {simResult ? simResult.estimatedPopulationImpact.toLocaleString() : '—'}
                   </p>
                 </div>
               </div>

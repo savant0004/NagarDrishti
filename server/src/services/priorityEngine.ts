@@ -4,7 +4,7 @@ export interface PriorityCalculationParams {
   type: IssueType;
   severity: IssueSeverity;
   reportsCount: number;
-  estimatedPopulationImpact: number;
+  estimatedPopulationImpact?: number | null;
   nearbyInfrastructure: INearbyInfrastructure;
   createdAt?: Date;
   trafficVolume?: number; // 0 - 100%
@@ -50,12 +50,16 @@ export function calculatePriorityScore(params: PriorityCalculationParams): Prior
   let trafficScore = Math.min(20, Math.round((trafficVolume / 100) * 18) + (params.type === 'Pothole' || params.type === 'Traffic Congestion' || params.type === 'Road Obstruction' ? 2 : 0));
 
   // 3. Population Impact Score (0 - 20)
-  const pop = params.estimatedPopulationImpact || 500;
-  let populationScore = 5;
-  if (pop > 5000) populationScore = 20;
+  const pop = params.estimatedPopulationImpact ?? null;
+  let populationScore = 0;
+  if (pop === null) {
+    // Missing population data contributes no points and remains unknown in analytics.
+  }
+  else if (pop > 5000) populationScore = 20;
   else if (pop > 2500) populationScore = 17;
   else if (pop > 1000) populationScore = 14;
   else if (pop > 500) populationScore = 10;
+  else if (pop > 0) populationScore = 5;
 
   // 4. Infrastructure Importance (0 - 15)
   const infra = params.nearbyInfrastructure || { schools: 0, hospitals: 0, busStops: 0, residentialCount: 0, commercialCount: 0 };

@@ -6,6 +6,8 @@ export async function getAnalytics(req: Request, res: Response) {
     const analytics = await store.getAnalytics();
     return res.json({ success: true, data: analytics });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err.message });
+    const unavailable = String(err?.message || '').includes('MongoDB is unavailable') || String(err?.message || '').includes('DEMO_MODE is disabled');
+    if (!unavailable) console.error(JSON.stringify({ level: 'error', event: 'analytics_read_failed', errorName: err?.name || 'Error' }));
+    return res.status(unavailable ? 503 : 500).json({ success: false, code: unavailable ? 'DATABASE_UNAVAILABLE' : 'ANALYTICS_READ_FAILED', error: unavailable ? 'Analytics are temporarily unavailable.' : 'Unable to calculate analytics.' });
   }
 }

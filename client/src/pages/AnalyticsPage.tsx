@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { api } from '../services/api';
+import { getSocket } from '../services/socket';
 import {
   BarChart,
   Bar,
@@ -12,47 +13,51 @@ import {
   PieChart,
   Pie,
   Cell,
-  LineChart,
-  Line,
   CartesianGrid,
 } from 'recharts';
 import {
   BarChart3,
-  TrendingUp,
   AlertTriangle,
   Clock,
   Users,
-  Calendar,
-  Filter,
+  FileText,
   ShieldAlert,
   Layers,
 } from 'lucide-react';
 
 export function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<any>(null);
-  const [dateRange, setDateRange] = useState<'Today' | '7D' | '30D' | '90D'>('30D');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const load = useCallback(async () => {
+    try { const data = await api.getAnalytics(); setAnalytics(data); setErrorMsg(''); }
+    catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Unable to load analytics.'); }
+  }, []);
 
   useEffect(() => {
-    async function load() {
-      const data = await api.getAnalytics();
-      setAnalytics(data);
-    }
-    load();
-  }, []);
+    void load();
+    const socket = getSocket();
+    const refresh = () => { void load(); };
+    socket.on('report:created', refresh);
+    socket.on('report:updated', refresh);
+    socket.on('issue:created', refresh);
+    socket.on('issue:updated', refresh);
+    socket.on('issue:deleted', refresh);
+    socket.on('data:reseeded', refresh);
+    return () => {
+      socket.off('report:created', refresh);
+      socket.off('report:updated', refresh);
+      socket.off('issue:created', refresh);
+      socket.off('issue:updated', refresh);
+      socket.off('issue:deleted', refresh);
+      socket.off('data:reseeded', refresh);
+    };
+  }, [load]);
 
   const COLORS = ['#ef4444', '#f59e0b', '#eab308', '#10b981'];
   const BAR_COLORS = ['#0284c7', '#06b6d4', '#10b981', '#f59e0b', '#ec4899'];
 
   // Time trend data
-  const timeTrendData = [
-    { day: 'Mon', active: 12, resolved: 8 },
-    { day: 'Tue', active: 15, resolved: 10 },
-    { day: 'Wed', active: 18, resolved: 14 },
-    { day: 'Thu', active: 14, resolved: 12 },
-    { day: 'Fri', active: 22, resolved: 16 },
-    { day: 'Sat', active: 19, resolved: 15 },
-    { day: 'Sun', active: 16, resolved: 18 },
-  ];
 
   return (
     <div className="flex h-screen w-screen bg-[#060a12] text-slate-100 overflow-hidden font-sans">
@@ -62,6 +67,8 @@ export function AnalyticsPage() {
         <Header />
 
         <main className="p-6 lg:p-10 space-y-8 max-w-7xl mx-auto w-full">
+          {errorMsg && <div role="alert" className="p-4 bg-red-950/60 border border-red-800 text-red-300 rounded-xl text-xs">{errorMsg}</div>}
+          {analytics && <div className="text-xs text-slate-400">Data source: <strong className="text-cyan-400">{analytics.dataSource === 'demo' ? 'DEMO SAMPLE RECORDS' : 'LIVE BACKEND DATA'}</strong></div>}
           {/* Header Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-6">
             <div>
@@ -74,20 +81,7 @@ export function AnalyticsPage() {
               </p>
             </div>
 
-            {/* Date Range Selector */}
-            <div className="flex items-center bg-slate-900 p-1.5 rounded-2xl border border-slate-800 text-xs">
-              {(['Today', '7D', '30D', '90D'] as const).map((range) => (
-                <button
-                  key={range}
-                  onClick={() => setDateRange(range)}
-                  className={`px-3.5 py-1.5 rounded-xl transition font-bold ${
-                    dateRange === range ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/25' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {range}
-                </button>
-              ))}
-            </div>
+            <div className="text-xs font-mono text-slate-400">ALL AVAILABLE RECORDS</div>
           </div>
 
           {/* Metric Cards Grid */}
@@ -100,8 +94,8 @@ export function AnalyticsPage() {
                 </div>
               </div>
               <div>
-                <p className="text-3xl font-extrabold font-mono text-cyan-400">{analytics?.totalActiveIssues || 8}</p>
-                <p className="text-[11px] text-slate-400 mt-1">Monitored across 8 city streets</p>
+                <p className="text-3xl font-extrabold font-mono text-cyan-400">{analytics?.totalActiveIssues ?? '—'}</p>
+                <p className="text-[11px] text-slate-400 mt-1">Active issue records</p>
               </div>
             </div>
 
@@ -113,7 +107,7 @@ export function AnalyticsPage() {
                 </div>
               </div>
               <div>
-                <p className="text-3xl font-extrabold font-mono text-red-400">{analytics?.criticalIssuesCount || 2}</p>
+                <p className="text-3xl font-extrabold font-mono text-red-400">{analytics?.criticalIssuesCount ?? '—'}</p>
                 <p className="text-[11px] text-red-400 font-semibold mt-1">High risk to infrastructure & schools</p>
               </div>
             </div>
@@ -126,8 +120,8 @@ export function AnalyticsPage() {
                 </div>
               </div>
               <div>
-                <p className="text-3xl font-extrabold font-mono text-amber-400">{analytics?.avgResolutionHours || 26.8} hrs</p>
-                <p className="text-[11px] text-green-400 font-semibold mt-1">▲ 12.5% faster than last month</p>
+                <p className="text-3xl font-extrabold font-mono text-amber-400">{analytics?.avgResolutionHours ?? '—'} hrs</p>
+                <p className="text-[11px] text-slate-400 font-semibold mt-1">Average recorded resolution time</p>
               </div>
             </div>
 
@@ -140,9 +134,9 @@ export function AnalyticsPage() {
               </div>
               <div>
                 <p className="text-3xl font-extrabold font-mono text-slate-100">
-                  {(analytics?.totalPopulationImpacted || 41840).toLocaleString()}
+                  {analytics?.totalPopulationImpacted === null || analytics?.totalPopulationImpacted === undefined ? '—' : analytics.totalPopulationImpacted.toLocaleString()}
                 </p>
-                <p className="text-[11px] text-slate-400 mt-1">Commuters, residents & students</p>
+                <p className="text-[11px] text-slate-400 mt-1">Sum of recorded estimates; — means incomplete</p>
               </div>
             </div>
 
@@ -154,9 +148,19 @@ export function AnalyticsPage() {
                 </div>
               </div>
               <div>
-                <p className="text-3xl font-extrabold font-mono text-green-400">{analytics?.resolvedCount || 140}</p>
-                <p className="text-[11px] text-slate-400 mt-1">This month across all streets</p>
+                <p className="text-3xl font-extrabold font-mono text-green-400">{analytics?.resolvedComplaints ?? '—'}</p>
+                <p className="text-[11px] text-slate-400 mt-1">Resolved complaint records</p>
               </div>
+            </div>
+            <div className="glass-panel p-5 rounded-3xl space-y-3 border border-slate-800">
+              <div className="flex justify-between items-center text-slate-400 text-xs"><span className="font-semibold">Total Complaints</span><FileText className="w-4 h-4 text-cyan-400" /></div>
+              <p className="text-3xl font-extrabold font-mono text-cyan-400">{analytics?.totalComplaints ?? '—'}</p>
+              <p className="text-[11px] text-slate-400">All backend complaint records</p>
+            </div>
+            <div className="glass-panel p-5 rounded-3xl space-y-3 border border-slate-800">
+              <div className="flex justify-between items-center text-slate-400 text-xs"><span className="font-semibold">Pending Complaints</span><Clock className="w-4 h-4 text-amber-400" /></div>
+              <p className="text-3xl font-extrabold font-mono text-amber-400">{analytics?.pendingComplaints ?? '—'}</p>
+              <p className="text-[11px] text-slate-400">Every complaint not yet resolved</p>
             </div>
           </div>
 
@@ -166,13 +170,13 @@ export function AnalyticsPage() {
             <div className="glass-panel p-6 rounded-3xl space-y-4 border border-slate-800">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-cyan-400" /> Issues by Category
+                  <BarChart3 className="w-4 h-4 text-cyan-400" /> Complaints by Category
                 </h3>
                 <span className="text-[10px] font-mono text-slate-400">COUNT BREAKDOWN</span>
               </div>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={analytics?.categoryDistribution || []} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                    <BarChart data={analytics?.complaintCategoryDistribution || []} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                     <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} interval={0} height={40} />
                     <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
@@ -180,10 +184,30 @@ export function AnalyticsPage() {
                       contentStyle={{ background: '#0b1326', borderColor: '#00f2fe', borderRadius: '12px', color: '#fff', fontSize: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }}
                     />
                     <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                      {(analytics?.categoryDistribution || []).map((entry: any, index: number) => (
+                      {(analytics?.complaintCategoryDistribution || []).map((entry: any, index: number) => (
                         <Cell key={`bar-cell-${index}`} fill={BAR_COLORS[index % BAR_COLORS.length]} />
                       ))}
                     </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="glass-panel p-6 rounded-3xl space-y-4 border border-slate-800">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" /> Complaints by Severity
+                </h3>
+                <span className="text-[10px] font-mono text-slate-400">CITIZEN REPORT RECORDS</span>
+              </div>
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics?.complaintSeverityDistribution || []} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
+                    <Tooltip contentStyle={{ background: '#0b1326', borderColor: '#00f2fe', borderRadius: '12px', color: '#fff', fontSize: '12px' }} />
+                    <Bar dataKey="count" fill="#f59e0b" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -220,7 +244,7 @@ export function AnalyticsPage() {
                 </ResponsiveContainer>
                 {/* Center Badge Overlay */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
-                  <span className="text-2xl font-extrabold font-mono text-white">8</span>
+                  <span className="text-2xl font-extrabold font-mono text-white">{analytics?.totalActiveIssues ?? '—'}</span>
                   <span className="text-[10px] font-bold text-slate-400 uppercase">HAZARDS</span>
                 </div>
               </div>
@@ -241,26 +265,25 @@ export function AnalyticsPage() {
               </div>
             </div>
 
-            {/* Chart 3: Weekly Active vs Resolved Trend */}
+            {/* Complaint status totals from backend records */}
             <div className="glass-panel p-6 rounded-3xl space-y-4 lg:col-span-2 border border-slate-800">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-green-400" /> Incident Velocity: Created vs. Resolved
+                  <BarChart3 className="w-4 h-4 text-green-400" /> Complaints by Status
                 </h3>
-                <span className="text-[10px] font-mono text-slate-400">WEEKLY PACE</span>
+                <span className="text-[10px] font-mono text-slate-400">BACKEND COMPLAINT TOTALS</span>
               </div>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeTrendData} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
+                  <BarChart data={analytics?.complaintStatusDistribution || []} margin={{ top: 10, right: 20, left: -20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                    <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} />
+                    <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
                     <YAxis stroke="#94a3b8" fontSize={11} />
                     <Tooltip
                       contentStyle={{ background: '#0b1326', borderColor: '#00f2fe', borderRadius: '12px', color: '#fff', fontSize: '12px' }}
                     />
-                    <Line type="monotone" name="Active Hazards" dataKey="active" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} />
-                    <Line type="monotone" name="Resolved Issues" dataKey="resolved" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} />
-                  </LineChart>
+                    <Bar name="Complaints" dataKey="count" fill="#06b6d4" radius={[6, 6, 0, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>

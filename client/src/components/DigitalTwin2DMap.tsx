@@ -14,10 +14,21 @@ interface DigitalTwin2DMapProps {
 
 type MapTheme = 'dark' | 'satellite' | 'street';
 
+const CARTO_API_KEY = import.meta.env.VITE_CARTO_API_KEY?.trim() ?? '';
+
+function withCartoKey(template: string): string {
+  const [path, query = ''] = template.split('?');
+  const params = new URLSearchParams(query);
+  params.delete('key');
+  if (CARTO_API_KEY) params.set('key', CARTO_API_KEY);
+  const serialized = params.toString();
+  return serialized ? `${path}?${serialized}` : path;
+}
+
 const TILE_SERVERS: Record<MapTheme, { url: string; attribution: string; name: string }> = {
   dark: {
     name: 'Dark Cyber GIS',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    url: withCartoKey('https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png'),
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
   },
   satellite: {
@@ -27,7 +38,7 @@ const TILE_SERVERS: Record<MapTheme, { url: string; attribution: string; name: s
   },
   street: {
     name: 'High-Contrast Street View',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    url: withCartoKey('https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'),
     attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
   },
 };
@@ -129,6 +140,33 @@ function MapRecenter({ selectedIssue }: { selectedIssue: IIssue | null }) {
 export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue, rainfallSimulation = 0 }: DigitalTwin2DMapProps) {
   const [mapTheme, setMapTheme] = useState<MapTheme>('dark');
   const [showLegend, setShowLegend] = useState<boolean>(true);
+  const [tileError, setTileError] = useState('');
+
+  useEffect(() => { setTileError(''); }, [mapTheme]);
+
+  const handleTileError = async (event: any) => {
+    if (mapTheme === 'satellite') return;
+    const status = event?.error?.status ?? event?.tile?.status;
+    if (typeof status === 'number') {
+      setTileError(`CARTO rejected a map tile (HTTP ${status}). Check that the configured API key is valid and enabled for these basemaps.`);
+      return;
+    }
+
+    // Image tile errors do not expose an HTTP status. Probe the same tile without logging or displaying its URL/key.
+    const tileUrl = event?.tile?.src;
+    if (!tileUrl) {
+      setTileError('CARTO map tiles failed to load. Check the API key and network connection.');
+      return;
+    }
+    try {
+      const response = await fetch(tileUrl, { method: 'GET' });
+      setTileError(response.ok
+        ? 'CARTO returned the tile, but the browser could not display it. Check browser network and image loading policies.'
+        : `CARTO rejected a map tile (HTTP ${response.status}). Check that the configured API key is valid and enabled for these basemaps.`);
+    } catch {
+      setTileError('CARTO map tiles failed to load and the response status is unavailable. Check the API key and network connection.');
+    }
+  };
 
   // Center of city (Bengaluru central area coordinates)
   const centerLat = 12.9716;
@@ -184,7 +222,12 @@ export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue
         zoomControl={false}
       >
         {/* Dynamic Tile Layer */}
-        <TileLayer attribution={TILE_SERVERS[mapTheme].attribution} url={TILE_SERVERS[mapTheme].url} />
+        {(mapTheme === 'satellite' || CARTO_API_KEY) && <TileLayer
+          key={mapTheme}
+          attribution={TILE_SERVERS[mapTheme].attribution}
+          url={TILE_SERVERS[mapTheme].url}
+          eventHandlers={{ tileerror: handleTileError }}
+        />}
 
         <MapRecenter selectedIssue={selectedIssue} />
 
@@ -284,6 +327,14 @@ export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue
         })}
       </MapContainer>
 
+      {mapTheme !== 'satellite' && !CARTO_API_KEY && <div role="alert" className="absolute inset-x-4 top-20 z-[1000] mx-auto max-w-xl rounded-xl border border-amber-500/60 bg-slate-950/95 p-4 text-sm text-amber-100 shadow-xl">
+        <strong className="block text-amber-300">CARTO API key is not configured</strong>
+        <span>Add <code>VITE_CARTO_API_KEY</code> to <code>client/.env.local</code>, then restart the Vite dev server. Satellite / Orthophoto remains available.</span>
+      </div>}
+      {tileError && mapTheme !== 'satellite' && CARTO_API_KEY && <div role="alert" className="absolute inset-x-4 top-20 z-[1000] mx-auto max-w-xl rounded-xl border border-red-500/60 bg-slate-950/95 p-4 text-sm text-red-100 shadow-xl">
+        <strong className="block text-red-300">Map tile request failed</strong>{tileError}
+      </div>}
+
       {/* Map Control: Map Layer Switcher (Top Right) */}
       <div className="absolute top-4 right-4 z-10 bg-slate-950/90 border border-slate-800 backdrop-blur-md p-1.5 rounded-xl flex items-center gap-1 shadow-xl">
         {(['dark', 'satellite', 'street'] as MapTheme[]).map((theme) => (
@@ -307,7 +358,7 @@ export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue
         <div className="flex items-center gap-2 border-r border-slate-800 pr-4">
           <Compass className="w-5 h-5 text-cyan-400" />
           <div>
-            <p className="text-[10px] text-slate-400 uppercase font-mono">MONITORED ZONE</p>
+            <p className="text-[10px] text-slate-400 uppercase font-mono">REFERENCE ZONE · ILLUSTRATIVE ESTIMATES</p>
             <p className="font-extrabold text-xs text-white">Central Urban Sector 4</p>
           </div>
         </div>

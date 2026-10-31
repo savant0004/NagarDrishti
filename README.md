@@ -17,12 +17,12 @@
 [![Three.js](https://img.shields.io/badge/Three.js-3D_Engine-white?style=flat-square&logo=three.js&logoColor=black)](https://threejs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-Express-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-Real--Time-010101?style=flat-square&logo=socket.io&logoColor=white)](https://socket.io/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-+_InMemory_Fallback-47a248?style=flat-square&logo=mongodb&logoColor=white)](https://mongodb.com/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Live_or_Explicit_Demo-47a248?style=flat-square&logo=mongodb&logoColor=white)](https://mongodb.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 <br/>
 
-> 🏆 **Built for Hackathon** · Full-Stack · Production-Ready · Zero Setup Required
+> 🏆 **Built for Hackathon** · Full-Stack · Explicit demo and live modes
 
 </div>
 
@@ -48,11 +48,27 @@ Municipal authorities and field crews can **see every problem, understand its tr
 | 🗺️ **2D GIS Mapping** | Leaflet · React-Leaflet | Color-coded risk markers, street health overlays, real Bengaluru coordinates |
 | 🤖 **AI Priority Engine** | Custom Algorithm | 7-factor weighted risk scoring — severity, population, infrastructure, traffic, weather |
 | ⛈️ **Scenario Simulator** | REST API + Live Map | "What If?" climate modeling — rainfall, drainage, traffic sliders with flood risk output |
-| 📱 **Citizen Reporter** | AI Vision Demo Service | Photo upload → auto-detects issue type + severity with confidence score |
+| 📱 **Citizen Reporter** | Groq Vision API | Photo upload → visually analyzes urban issues; unavailable analysis remains a manual report |
 | 📡 **Real-Time Updates** | Socket.IO WebSockets | Dashboard live-updates when issues are created or status changes |
 | 🏥 **Street Health Index** | Multi-metric Scoring | Per-street composite scores: Road · Drainage · Lighting · Sanitation · Traffic |
 | 📊 **Analytics Command** | Recharts | Issue velocity charts, risk distribution, category breakdown over time ranges |
 | 🔍 **Report Tracking** | Lifecycle Management | Citizens track their report ID through 5 resolution stages in real time |
+
+### Groq image analysis configuration
+
+For backend image analysis, set `GROQ_API_KEY` in `server/.env` (see `server/.env.example`). The model defaults to `qwen/qwen3.8-27b`; override it with `GROQ_MODEL` if needed. Keep this key on the server. If Groq analysis is unavailable, reports can still be submitted with a citizen-selected category; those reports are marked `not_analyzed` for review.
+
+## Running demo and live mode
+
+Use Node.js 20 or newer. Install dependencies with `npm install` in both `server` and `client`. Copy `server/.env.example` to the ignored `server/.env` and set a private `JWT_SECRET` of at least 32 bytes.
+
+For the seeded Bengaluru demonstration, set `DEMO_MODE=true`, `DEMO_ADMIN_EMAIL`, and `DEMO_ADMIN_PASSWORD` (at least 12 characters). Demo records are in memory, tagged as sample data, and reset when the server restarts. Start the API with `cd server && npm run dev`; start the client in another terminal with `cd client && npm run dev`. While the demo API is running, `cd server && npm run seed` safely resets only its in-memory sample data.
+
+For live records, set `DEMO_MODE=false` and provide `MONGODB_URI` for a local MongoDB or Atlas database. Live mode does not fall back to in-memory records. The first administrator can be provisioned with `npm run user:create-admin` from `server` after setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the ignored `server/.env`; the command refuses demo mode and will not overwrite an existing account. `/api/health` is liveness, while `/api/ready` reports whether required configuration and the active data store are ready.
+
+The client uses `/api` and `/socket.io` through Vite's development proxy by default. Configure `VITE_API_URL` for a deployed API origin, and optionally `VITE_SOCKET_URL` for a separate Socket.IO origin. Do not put server secrets in `VITE_` variables.
+
+Backend checks run with `cd server && npm test` and `npm run build`. The frontend TypeScript check and production bundle run with `cd client && npm run build`.
 
 ---
 
@@ -74,8 +90,8 @@ Municipal authorities and field crews can **see every problem, understand its tr
 │                                        ▼                  │
 │                              ┌─────────────────────┐     │
 │                              │   MongoDB            │     │
-│                              │   + Auto In-Memory  │     │
-│                              │     Fallback Store   │     │
+│                              │   Live MongoDB or   │     │
+│                              │ Explicit Demo Store │     │
 │                              └─────────────────────┘     │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -95,7 +111,7 @@ Municipal authorities and field crews can **see every problem, understand its tr
 - Node.js + Express.js + TypeScript
 - Socket.IO (WebSocket event hub)
 - Mongoose + MongoDB (primary database)
-- In-Memory Fail-Safe Store (zero-config fallback)
+- Explicit in-memory Bengaluru demo dataset (`DEMO_MODE=true`)
 - Multer (image upload processing)
 - Demo AI Vision Classification Service
 
@@ -126,8 +142,8 @@ Before a monsoon hits, city officials can model:
 - 6 streets turn to flood-risk overlay on the map
 - AI generates emergency recommendation: *"Deploy suction jetter on Sector 4 drainage — 3,240 residents at risk"*
 
-### 3. 🌐 Full Offline / Demo Mode
-The system runs **completely without MongoDB**. An in-memory store pre-loaded with 8 realistic issues, 7 citizen reports, and 8 streets activates automatically.
+### 3. 🌐 Explicit Demo and Live Modes
+Set `DEMO_MODE=true` to serve clearly marked, seeded Bengaluru sample records from memory without requiring MongoDB. Set `DEMO_MODE=false` to serve only MongoDB records; if MongoDB is unavailable, the API reports an error instead of substituting sample data. The `/api/health` endpoint reports the active mode and database connection state.
 
 ### 4. 📡 Real-Time WebSocket Hub
 - Socket.IO events: `issue:created`, `issue:updated`, `data:reseeded`
@@ -140,7 +156,7 @@ The system runs **completely without MongoDB**. An in-memory store pre-loaded wi
 
 ### Prerequisites
 - Node.js 18+ and npm
-- (Optional) MongoDB — app runs perfectly without it
+- MongoDB for live mode (optional when using explicit demo mode)
 
 ### Installation
 
@@ -152,9 +168,9 @@ cd nagardrishti
 # 2. Install ALL dependencies (root + server + client) in one command
 npm run install:all
 
-# 3. Configure environment (optional — works without MongoDB too)
-cp server/.env.example server/.env
-# Edit server/.env if you want to connect a real MongoDB instance
+# 3. Configure the backend environment
+copy .env.example server\.env
+# Keep DEMO_MODE=true for seeded sample data, or set it to false and configure MONGODB_URI for live records.
 
 # 4. Launch everything (frontend + backend simultaneously)
 npm run dev
@@ -284,7 +300,7 @@ fly deploy
 
 ### ⚠️ Deployment Checklist
 
-- [ ] Set `MONGODB_URI` to MongoDB Atlas connection string (or leave blank for demo mode)
+- [ ] Set `DEMO_MODE=false` and configure `MONGODB_URI` for live records (or use `DEMO_MODE=true` for labeled sample data)
 - [ ] Set `CLIENT_URL` to your deployed frontend domain (for CORS)
 - [ ] Set `NODE_ENV=production`
 - [ ] Set `PORT=5000` (or let hosting platform assign)
@@ -317,7 +333,7 @@ nagardrishti/
 │   │   │   ├── ReportsListPage.tsx  # Reports registry table
 │   │   │   └── ReportTrackerPage.tsx # Tracking timeline
 │   │   ├── services/
-│   │   │   ├── api.ts           # REST API client + fallback data
+│   │   │   ├── api.ts           # REST API client
 │   │   │   └── socket.ts        # Socket.IO client
 │   │   └── types/               # TypeScript type definitions
 │
