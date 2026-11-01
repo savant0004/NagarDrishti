@@ -33,31 +33,43 @@ export function SimulatorPage() {
   const [selectedIssue, setSelectedIssue] = useState<IIssue | null>(null);
   const [simResult, setSimResult] = useState<ISimulationResult | null>(null);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [simulationError, setSimulationError] = useState('');
+  const [simulationRetry, setSimulationRetry] = useState(0);
+  const [dataError, setDataError] = useState('');
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataRetry, setDataRetry] = useState(0);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('3D');
 
   useEffect(() => {
+    let isCancelled = false;
     async function init() {
-      const [iss, str] = await Promise.all([api.getIssues(), api.getStreets()]);
-      setIssues(iss);
-      setStreets(str);
+      setDataLoading(true); setDataError('');
+      try {
+        const [iss, str] = await Promise.all([api.getIssues(), api.getStreets()]);
+        if (!isCancelled) { setIssues(iss); setStreets(str); }
+      } catch (error) {
+        if (!isCancelled) setDataError(error instanceof Error ? error.message : 'Unable to load simulator map data.');
+      } finally { if (!isCancelled) setDataLoading(false); }
     }
-    init();
-  }, []);
+    void init();
+    return () => { isCancelled = true; };
+  }, [dataRetry]);
 
   // Trigger simulation re-calculation when sliders adjust
   useEffect(() => {
     let isCancelled = false;
     async function executeSim() {
       setIsSimulating(true);
-      const res = await api.runSimulation({
-        rainfall,
-        traffic,
-        drainageCapacity,
-        garbageDelay,
-      });
-      if (!isCancelled) {
+      setSimulationError(''); setSimResult(null);
+      try {
+        const res = await api.runSimulation({ rainfall, traffic, drainageCapacity, garbageDelay });
+        if (!isCancelled) {
         setSimResult(res);
-        setIsSimulating(false);
+        }
+      } catch (error) {
+        if (!isCancelled) setSimulationError(error instanceof Error ? error.message : 'The flood scenario could not be calculated.');
+      } finally {
+        if (!isCancelled) setIsSimulating(false);
       }
     }
     const timer = setTimeout(executeSim, 200);
@@ -65,7 +77,7 @@ export function SimulatorPage() {
       isCancelled = true;
       clearTimeout(timer);
     };
-  }, [rainfall, traffic, drainageCapacity, garbageDelay]);
+  }, [rainfall, traffic, drainageCapacity, garbageDelay, simulationRetry]);
 
   const handleResetSliders = () => {
     setRainfall(20);
@@ -90,6 +102,7 @@ export function SimulatorPage() {
                   <Sliders className="w-3.5 h-3.5" /> What If? Scenario Engine
                 </div>
                 <h2 className="text-lg font-extrabold text-slate-100 mt-1">Urban Climate Simulator</h2>
+                <p className="mt-1 text-[10px] text-slate-400">Inputs are hypothetical scenario values, not live weather or sensor readings.</p>
               </div>
               <button
                 onClick={handleResetSliders}
@@ -205,7 +218,13 @@ export function SimulatorPage() {
 
             {/* Simulation Metric Output Cards */}
             <div className="space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Simulated Impact Matrix</h3>
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Simulated Impact Matrix</h3>
+                {isSimulating && <span role="status" className="text-[10px] text-cyan-300 animate-pulse">Calculating scenario…</span>}
+              </div>
+              {simulationError && <div role="alert" className="p-3 rounded-xl border border-red-800 bg-red-950/50 text-xs text-red-200 space-y-2"><p>{simulationError}</p><button type="button" onClick={() => setSimulationRetry((value) => value + 1)} disabled={isSimulating} className="px-3 py-1.5 rounded-lg bg-red-900 text-red-100 font-bold disabled:opacity-50">Retry simulation</button></div>}
+              {dataError && <div role="alert" className="p-3 rounded-xl border border-red-800 bg-red-950/50 text-xs text-red-200 space-y-2"><p>{dataError}</p><button type="button" onClick={() => setDataRetry((value) => value + 1)} disabled={dataLoading} className="px-3 py-1.5 rounded-lg bg-red-900 text-red-100 font-bold disabled:opacity-50">{dataLoading ? 'Loading map data…' : 'Retry map data'}</button></div>}
+              {dataLoading && <p role="status" className="text-[10px] text-slate-400">Loading issues and street data…</p>}
               <div className="grid grid-cols-2 gap-3">
                 <div className="glass-panel p-3.5 rounded-2xl space-y-1">
                   <p className="text-[11px] text-slate-400">Drainage Risk Level</p>
@@ -228,14 +247,14 @@ export function SimulatorPage() {
                 </div>
 
                 <div className="glass-panel p-3.5 rounded-2xl space-y-1">
-                  <p className="text-[11px] text-slate-400">Affected Roads</p>
+                  <p className="text-[11px] text-slate-400">Historical Areas in Scope</p>
                   <p className="text-sm font-extrabold font-mono text-amber-400">{simResult ? `${simResult.affectedRoadsCount} Streets` : '—'}</p>
                 </div>
 
                 <div className="glass-panel p-3.5 rounded-2xl space-y-1">
-                  <p className="text-[11px] text-slate-400">Est. Population Impact</p>
+                  <p className="text-[11px] text-slate-400">Population Impact</p>
                   <p className="text-sm font-extrabold font-mono text-slate-100">
-                    {simResult ? simResult.estimatedPopulationImpact.toLocaleString() : '—'}
+                    {simResult?.estimatedPopulationImpact === null ? 'Not estimated' : simResult ? simResult.estimatedPopulationImpact.toLocaleString() : '—'}
                   </p>
                 </div>
               </div>
@@ -255,6 +274,7 @@ export function SimulatorPage() {
             <p className="text-[11px] text-slate-400 font-mono italic text-center">
               SIMULATION — MODELED SCENARIO (not an official government forecast)
             </p>
+            {simResult && <div className="glass-panel p-3 rounded-xl space-y-2 border border-slate-800"><p className="text-[10px] uppercase font-bold tracking-wide text-cyan-300">Simulation assumptions</p><ul className="list-disc pl-4 space-y-1 text-[10px] leading-relaxed text-slate-400">{simResult.assumptions?.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul><p className="text-[10px] text-slate-400">Historical waterlogging/drainage complaints: {simResult.historicalObservations?.floodRelatedComplaints ?? 0} total, {simResult.historicalObservations?.openFloodRelatedComplaints ?? 0} open. Live sensors: {simResult.sensorDataAvailable ? 'available' : 'not connected'} · Terrain data: {simResult.elevationDataAvailable ? 'available' : 'not available'}.</p></div>}
           </div>
 
           {/* Right Digital Twin Viewport (2D or 3D Toggle) */}

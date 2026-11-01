@@ -20,7 +20,7 @@ test('citizen accounts use hashed credentials and signed expiring sessions', asy
   assert.equal(auth.verifyToken(`${token}x`), null);
 });
 
-test('complaint submission is idempotent, groups nearby issues once, and updates linked status', async () => {
+test('complaint submission is idempotent, keeps nearby complaints separate until staff links them, and updates linked status', async () => {
   const userId = `test-user-${Date.now()}`;
   const idempotencyKey = `submission-${Date.now()}`;
   const reportData = { userId, idempotencyKey, issueType: 'Road Obstruction', description: 'A fallen branch blocks one lane.', latitude: 12.90123, longitude: 77.60123, streetName: 'Test Road', severity: 'Medium', status: 'Submitted' };
@@ -32,6 +32,16 @@ test('complaint submission is idempotent, groups nearby issues once, and updates
   assert.equal(duplicate.idempotent, true);
   assert.equal(duplicate.report.reportId, created.report.reportId);
   assert.equal(duplicate.issue.id, created.issue.id);
+
+  const second = await store.createReportAndAssociateIssue({ ...reportData, userId: `${userId}-second`, idempotencyKey: `${idempotencyKey}-second` }, issueInput);
+  assert.notEqual(second.issue.id, created.issue.id);
+  assert.notEqual(second.report.associatedIssueId, created.report.associatedIssueId);
+  const linked = await store.linkDuplicateReports(created.report.reportId, second.report.reportId, { id: 'staff-reviewer', role: 'municipal_staff' });
+  assert.ok(linked);
+  assert.equal(linked.source.associatedIssueId, linked.target.associatedIssueId);
+  assert.equal((await store.getIssueById(created.issue.id)).reportsCount, 2);
+  assert.equal((await store.getReportById(created.report.reportId)).reportId, created.report.reportId);
+  assert.equal((await store.getReportById(second.report.reportId)).reportId, second.report.reportId);
 
   const updated = await store.updateIssueAndAssociatedReports(created.issue.id, { status: 'RESOLVED' });
   assert.equal(updated.issue.status, 'RESOLVED');

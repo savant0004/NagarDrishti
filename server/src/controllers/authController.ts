@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { AuthServiceError, authenticate, createStaffUser, getUserById, issueToken, registerCitizen } from '../services/authService';
+import { AuthServiceError, authenticate, createStaffUser, getUserById, issueToken, registerCitizen, listStaffUsers, setStaffActive } from '../services/authService';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function validCredentials(name: unknown, email: unknown, password: unknown): boolean {
@@ -52,12 +52,26 @@ export async function currentUser(req: Request, res: Response) {
 }
 
 export async function createStaff(req: Request, res: Response) {
-  const { name, email, password, role = 'municipal_staff' } = req.body || {};
-  if (!validCredentials(name, email, password) || !['municipal_staff', 'admin'].includes(role)) {
-    return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'Provide a name, valid email, password of at least 12 characters, and supported staff role.' });
+  const { name, email, password, role = 'municipal_staff', department = '' } = req.body || {};
+  if (!validCredentials(name, email, password) || !['municipal_staff', 'admin'].includes(role) || typeof department !== 'string' || department.trim().length > 100) {
+    return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'Provide a name, valid email, password of at least 12 characters, supported staff role, and department of at most 100 characters.' });
   }
   try {
-    const user = await createStaffUser(name, email, password, role);
+    const user = await createStaffUser(name, email, password, role, department.trim());
     return res.status(201).json({ success: true, data: { user } });
+  } catch (error) { return serviceError(res, error); }
+}
+
+export async function getStaff(req: Request, res: Response) {
+  try { return res.json({ success: true, data: await listStaffUsers() }); }
+  catch (error) { return serviceError(res, error); }
+}
+
+export async function updateStaffStatus(req: Request, res: Response) {
+  if (typeof req.body?.isActive !== 'boolean') return res.status(400).json({ success: false, code: 'INVALID_INPUT', error: 'isActive must be a boolean.' });
+  try {
+    const updated = await setStaffActive(req.params.id, req.body.isActive);
+    if (updated && !req.body.isActive) req.app.get('io')?.in(`user:${req.params.id}`).disconnectSockets(true);
+    return updated ? res.json({ success: true }) : res.status(404).json({ success: false, code: 'STAFF_NOT_FOUND', error: 'Staff account not found or cannot be deactivated.' });
   } catch (error) { return serviceError(res, error); }
 }

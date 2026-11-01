@@ -17,7 +17,7 @@ export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type ReportStatus = 'Submitted' | 'Under Review' | 'Assigned' | 'In Progress' | 'Resolved';
 export type UserRole = 'citizen' | 'municipal_staff' | 'admin';
 
-export interface IAuthUser { id: string; name: string; email: string; role: UserRole; }
+export interface IAuthUser { id: string; name: string; email: string; role: UserRole; department?: string; }
 
 export interface INearbyInfrastructure {
   schools: number;
@@ -37,6 +37,7 @@ export interface IIssue {
   severity: IssueSeverity;
   latitude: number;
   longitude: number;
+  location?: { type: 'Point'; coordinates: [number, number] };
   streetName: string;
   status: IssueStatus;
   priorityScore: number;
@@ -56,6 +57,15 @@ export interface IIssue {
     weatherRisk: number;
   };
   assignedTeam?: string;
+  assignedUserId?: string;
+  department?: string;
+  resolutionNotes?: string;
+  resolutionEvidence?: string[];
+  verifiedVisualEvidence?: boolean;
+  aiDetectedSeverity?: IssueSeverity;
+  priorityLevel?: RiskLevel;
+  priorityExplanation?: string;
+  recommendedResponseHours?: number;
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string | null;
@@ -70,11 +80,24 @@ export interface ICitizenReport {
   image?: string;
   latitude: number;
   longitude: number;
+  location?: { type: 'Point'; coordinates: [number, number] };
   streetName: string;
   severity: IssueSeverity;
   status: ReportStatus;
   contactEmail?: string;
   userId?: string;
+  duplicateGroupId?: string;
+  possibleDuplicateReportIds?: string[];
+  duplicateLinkedReportIds?: string[];
+  assignedTo?: string;
+  department?: string;
+  resolutionNotes?: string;
+  resolutionEvidence?: string[];
+  history?: Array<{ action: string; note?: string; actorId: string; actorRole: string; createdAt: string }>;
+  priorityScore?: number;
+  priorityLevel?: RiskLevel;
+  priorityExplanation?: string;
+  recommendedResponseHours?: number;
   resolvedAt?: string | null;
   aiAnalysis?: {
     detected?: boolean;
@@ -123,8 +146,14 @@ export interface ISimulationResult {
   drainageRiskLevel: RiskLevel;
   floodRiskPercent: number;
   affectedRoadsCount: number;
-  estimatedPopulationImpact: number;
+  estimatedPopulationImpact: number | null;
   aiRecommendation: string;
+  assumptions?: string[];
+  contributingFactors?: string[];
+  historicalObservations?: { floodRelatedComplaints: number; openFloodRelatedComplaints: number; areas: string[] };
+  sensorDataAvailable?: boolean;
+  elevationDataAvailable?: boolean;
+  dataSource?: string;
   simulatedIssues: Array<{
     id: string;
     originalPriority: number;

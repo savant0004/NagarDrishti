@@ -3,10 +3,11 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Activity, BarChart3, Radio, ShieldAlert, Waves, Layers } from 'lucide-react';
-import { IIssue } from '../types';
+import { IIssue, ICitizenReport } from '../types';
 
 export interface HeroCity3DSceneProps {
   issues?: IIssue[];
+  reports?: ICitizenReport[];
   selectedIssue?: IIssue | null;
   onSelectIssue?: (issue: IIssue) => void;
   showHUD?: boolean;
@@ -319,6 +320,7 @@ function RealIssue3DPin({
 // Main 3D City Scene Component (Feature 1, 2, 7, 8, 15, 16)
 export function HeroCity3DScene({
   issues,
+  reports = [],
   selectedIssue,
   onSelectIssue,
   showHUD = true,
@@ -345,6 +347,11 @@ export function HeroCity3DScene({
       };
     });
   }, [issues]);
+
+  const mappedReportDots = useMemo(() => reports.filter((report) => Number.isFinite(report.latitude) && Number.isFinite(report.longitude)).slice(0, 500).map((report) => ({
+    report,
+    position: [Math.max(-55, Math.min(55, (report.longitude - 77.5946) * 12000)), 1.2, Math.max(-55, Math.min(55, (12.9716 - report.latitude) * 12000))] as [number, number, number],
+  })), [reports]);
 
   return (
     <div className="w-full h-full relative inset-0 pointer-events-auto overflow-hidden bg-[#04152d]">
@@ -384,6 +391,10 @@ export function HeroCity3DScene({
             onClick={() => onSelectIssue?.(issue)}
           />
         ))}
+        {mappedReportDots.map(({ report, position }) => <mesh key={`report-dot-${report.reportId}`} position={position}>
+          <sphereGeometry args={[0.8, 10, 8]} />
+          <meshStandardMaterial color={report.severity === 'Critical' ? '#ef4444' : report.severity === 'High' ? '#f59e0b' : '#22d3ee'} emissive={report.severity === 'Critical' ? '#7f1d1d' : '#083344'} />
+        </mesh>)}
 
         <OrbitControls
           autoRotate

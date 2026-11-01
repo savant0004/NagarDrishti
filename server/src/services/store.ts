@@ -35,6 +35,19 @@ class DataStoreService {
   }
 
   public getMode() { return this.isUsingMongo() ? 'live' : this.demoMode ? 'demo' : 'unavailable'; }
+  public getDataSource() {
+    if (this.demoMode) return 'demo';
+    if (!this.isUsingMongo()) return 'unavailable';
+    try {
+      const uri = process.env.MONGO_DATABASE_MODE === 'demo' ? process.env.MONGO_DEMO_URI : process.env.MONGODB_URI;
+      const databaseName = new URL(uri || '').pathname.replace(/^\//, '').split('/')[0]
+        || (process.env.MONGO_DATABASE_MODE === 'demo' ? 'nagardrishti_demo' : process.env.MONGODB_DATABASE?.trim())
+        || 'nagardrishti_demo';
+      return databaseName === 'nagardrishti_demo' ? 'demo' : 'live';
+    } catch {
+      return 'live';
+    }
+  }
   public getDatabaseState() { return this.demoMode ? 'demo' : this.isUsingMongo() ? 'connected' : this.mongoState; }
   public isReady() { return this.demoMode || this.isUsingMongo(); }
   public setDatabaseState(state: 'connecting' | 'connected' | 'degraded' | 'unavailable') {
@@ -67,13 +80,13 @@ class DataStoreService {
 
     // Populate Issues
     INITIAL_ISSUES.forEach((iss) => {
-      this.memoryIssues.set(iss.id, { _id: iss.id, ...iss, isDemo: true, updatedAt: new Date() });
+      this.memoryIssues.set(iss.id, { _id: iss.id, ...iss, location: { type: 'Point', coordinates: [iss.longitude, iss.latitude] }, isDemo: true, updatedAt: new Date() });
     });
 
     // Populate Reports
     const seedReports = generateSeedReports();
     seedReports.forEach((rep) => {
-      this.memoryReports.set(rep.reportId, { _id: rep.reportId, ...rep, isDemo: true, updatedAt: new Date() });
+      this.memoryReports.set(rep.reportId, { _id: rep.reportId, ...rep, location: { type: 'Point', coordinates: [rep.longitude, rep.latitude] }, isDemo: true, updatedAt: new Date() });
     });
   }
 
@@ -110,7 +123,10 @@ class DataStoreService {
       severity: issueData.severity || 'Medium',
       reportsCount: issueData.reportsCount || 1,
       estimatedPopulationImpact: issueData.estimatedPopulationImpact ?? null,
-      nearbyInfrastructure: issueData.nearbyInfrastructure || { schools: 0, hospitals: 0, busStops: 1, residentialCount: 5, commercialCount: 5 },
+      nearbyInfrastructure: issueData.nearbyInfrastructure || { schools: 0, hospitals: 0, busStops: 0, residentialCount: 0, commercialCount: 0 },
+      aiDetectedSeverity: issueData.aiDetectedSeverity,
+      verifiedVisualEvidence: issueData.verifiedVisualEvidence === true,
+      isResolved: issueData.status === 'RESOLVED',
     });
 
     const newDoc = {
@@ -121,6 +137,9 @@ class DataStoreService {
       priorityBreakdown: calculated.breakdown,
       recommendedAction: calculated.recommendedAction,
       reason: calculated.reason,
+      priorityLevel: calculated.priorityLevel,
+      priorityExplanation: calculated.priorityExplanation,
+      recommendedResponseHours: calculated.recommendedResponseHours,
       status: issueData.status || 'NEW',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -201,12 +220,54 @@ class DataStoreService {
     return this.memoryReports.get(reportId) || null;
   }
 
+  public async getNearbyReports(latitude: number, longitude: number, radiusMeters = 500, issueType?: string): Promise<any[]> {
+    this.ensureAvailable();
+    const radians = Math.PI / 180;
+    const distance = (report: any) => {
+      const dLat = (Number(report.latitude) - latitude) * radians;
+      const dLng = (Number(report.longitude) - longitude) * radians;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(latitude * radians) * Math.cos(Number(report.latitude) * radians) * Math.sin(dLng / 2) ** 2;
+      return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+    if (this.isUsingMongo()) {
+      try {
+        const geometry = { type: 'Point', coordinates: [longitude, latitude] };
+        const filter: any = { location: { $near: { $geometry: geometry, $maxDistance: radiusMeters } } };
+        if (issueType) filter.issueType = issueType;
+        return await CitizenReportModel.find(filter).limit(50);
+      } catch (error) { this.logDatabaseError('find nearby reports', error); }
+    }
+    return [...this.memoryReports.values()].filter((report) => (!issueType || report.issueType === issueType) && distance(report) <= radiusMeters)
+      .sort((a, b) => distance(a) - distance(b)).slice(0, 50);
+  }
+
+  public async getComplaintHotspots(cellMeters = 300, sourceReports?: any[]): Promise<Array<{ latitude: number; longitude: number; count: number; categories: Record<string, number>; openCount: number }>> {
+    const reports = sourceReports || await this.getReports();
+    const cells = new Map<string, { latSum: number; lngSum: number; count: number; openCount: number; categories: Map<string, number> }>();
+    const latStep = cellMeters / 111320;
+    for (const report of reports) {
+      const lat = Number(report.latitude), lng = Number(report.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const lngStep = latStep / Math.max(0.1, Math.cos(lat * Math.PI / 180));
+      const key = `${Math.floor(lat / latStep)}:${Math.floor(lng / lngStep)}`;
+      const cell = cells.get(key) || { latSum: 0, lngSum: 0, count: 0, openCount: 0, categories: new Map<string, number>() };
+      cell.latSum += lat; cell.lngSum += lng; cell.count += 1;
+      if (report.status !== 'Resolved') cell.openCount += 1;
+      cell.categories.set(report.issueType, (cell.categories.get(report.issueType) || 0) + 1);
+      cells.set(key, cell);
+    }
+    return [...cells.values()].filter((cell) => cell.count >= 2)
+      .map((cell) => ({ latitude: cell.latSum / cell.count, longitude: cell.lngSum / cell.count, count: cell.count, categories: Object.fromEntries(cell.categories), openCount: cell.openCount }))
+      .sort((a, b) => b.count - a.count).slice(0, 25);
+  }
+
   public async createReport(reportData: any): Promise<any> {
     this.ensureAvailable();
     const reportId = this.generateReportId();
     const newReport = {
       ...reportData,
       reportId,
+      location: { type: 'Point', coordinates: [reportData.longitude, reportData.latitude] },
       status: reportData.status || 'Submitted',
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -249,62 +310,38 @@ class DataStoreService {
       }
     }
 
-    const possibleMatches = await IssueModel.find({
+    // Similarity is advisory. Every citizen submission gets a separate issue
+    // until authorized staff explicitly confirms a duplicate link.
+    const calculated = calculatePriorityScore({
       type: issueInput.type,
-      status: { $ne: 'RESOLVED' },
-      latitude: { $gte: issueInput.latitude - 0.006, $lte: issueInput.latitude + 0.006 },
-      longitude: { $gte: issueInput.longitude - 0.006, $lte: issueInput.longitude + 0.006 },
-    }, null, queryOptions).sort({ reportsCount: -1 });
-    const existingIssue = possibleMatches.find((issue) => Math.hypot(issue.latitude - issueInput.latitude, issue.longitude - issueInput.longitude) <= 0.006);
-    let issue: any;
-    let issueCreated = false;
-    if (existingIssue) {
-      const reportsCount = (existingIssue.reportsCount || 1) + 1;
-      const calculated = calculatePriorityScore({
-        type: existingIssue.type,
-        severity: existingIssue.severity,
-        reportsCount,
-        estimatedPopulationImpact: existingIssue.estimatedPopulationImpact,
-        nearbyInfrastructure: existingIssue.nearbyInfrastructure,
-        createdAt: existingIssue.createdAt,
-      });
-      issue = await IssueModel.findOneAndUpdate({ _id: existingIssue._id }, { $set: {
-        reportsCount,
-        priorityScore: calculated.priorityScore,
-        riskLevel: calculated.riskLevel,
-        priorityBreakdown: calculated.breakdown,
-        recommendedAction: calculated.recommendedAction,
-        reason: `${calculated.reason} (Grouped ${reportsCount} nearby citizen reports.)`,
-      } }, { ...queryOptions, new: true, runValidators: true });
-    } else {
-      const calculated = calculatePriorityScore({
-        type: issueInput.type,
-        severity: issueInput.severity,
-        reportsCount: 1,
-        estimatedPopulationImpact: issueInput.estimatedPopulationImpact ?? null,
-        nearbyInfrastructure: issueInput.nearbyInfrastructure,
-      });
-      const doc = new IssueModel({
-        ...issueInput,
-        id: issueInput.id || `ISSUE-${randomBytes(12).toString('hex').toUpperCase()}`,
-        reportsCount: 1,
-        estimatedPopulationImpact: issueInput.estimatedPopulationImpact ?? null,
-        priorityScore: calculated.priorityScore,
-        riskLevel: calculated.riskLevel,
-        priorityBreakdown: calculated.breakdown,
-        recommendedAction: calculated.recommendedAction,
-        reason: calculated.reason,
-        status: 'NEW',
-      });
-      await doc.save(queryOptions);
-      issue = doc;
-      issueCreated = true;
-    }
+      severity: issueInput.severity,
+      reportsCount: 1,
+      estimatedPopulationImpact: issueInput.estimatedPopulationImpact ?? null,
+      nearbyInfrastructure: issueInput.nearbyInfrastructure,
+      aiDetectedSeverity: issueInput.aiDetectedSeverity,
+      verifiedVisualEvidence: issueInput.verifiedVisualEvidence === true,
+    });
+    const issue = new IssueModel({
+      ...issueInput,
+      id: issueInput.id || `ISSUE-${randomBytes(12).toString('hex').toUpperCase()}`,
+      reportsCount: 1,
+      estimatedPopulationImpact: issueInput.estimatedPopulationImpact ?? null,
+      priorityScore: calculated.priorityScore,
+      riskLevel: calculated.riskLevel,
+      priorityBreakdown: calculated.breakdown,
+      recommendedAction: calculated.recommendedAction,
+      reason: calculated.reason,
+      priorityLevel: calculated.priorityLevel,
+      priorityExplanation: calculated.priorityExplanation,
+      recommendedResponseHours: calculated.recommendedResponseHours,
+      status: 'NEW',
+    });
+    await issue.save(queryOptions);
 
     const reportId = this.generateReportId();
-    const report = new CitizenReportModel({ ...reportData, reportId, associatedIssueId: issue.id, status: 'Submitted' });
+    const report = new CitizenReportModel({ ...reportData, priorityScore: issue.priorityScore, priorityLevel: issue.priorityLevel || issue.riskLevel, priorityExplanation: issue.priorityExplanation || issue.reason, recommendedResponseHours: issue.recommendedResponseHours, reportId, associatedIssueId: issue.id, duplicateGroupId: issue.id, status: 'Submitted', location: { type: 'Point', coordinates: [reportData.longitude, reportData.latitude] } });
     await report.save(queryOptions);
-    return { report, issue: this.normalizeIssue(issue), issueCreated, idempotent: false };
+    return { report, issue: this.normalizeIssue(issue), issueCreated: true, idempotent: false };
   }
 
   public async createReportAndAssociateIssue(reportData: any, issueInput: any): Promise<any> {
@@ -312,24 +349,12 @@ class DataStoreService {
     if (this.demoMode) {
       const duplicate = reportData.idempotencyKey && [...this.memoryReports.values()].find((report) => report.userId === reportData.userId && report.idempotencyKey === reportData.idempotencyKey);
       if (duplicate) return { report: duplicate, issue: this.memoryIssues.get(duplicate.associatedIssueId) || null, issueCreated: false, idempotent: true };
-      const previousIssues = new Map(this.memoryIssues);
-      const possibleMatches = [...this.memoryIssues.values()].filter((issue) => issue.type === issueInput.type && issue.status !== 'RESOLVED' && Math.hypot(issue.latitude - issueInput.latitude, issue.longitude - issueInput.longitude) <= 0.006);
-      let issue: any;
-      let issueCreated = false;
-      if (possibleMatches.length) {
-        const existing = possibleMatches.sort((a, b) => b.reportsCount - a.reportsCount)[0];
-        const reportsCount = (existing.reportsCount || 1) + 1;
-        const calculated = calculatePriorityScore({ type: existing.type, severity: existing.severity, reportsCount, estimatedPopulationImpact: existing.estimatedPopulationImpact, nearbyInfrastructure: existing.nearbyInfrastructure, createdAt: existing.createdAt });
-        issue = await this.updateIssue(existing.id, { reportsCount, priorityScore: calculated.priorityScore, riskLevel: calculated.riskLevel, priorityBreakdown: calculated.breakdown, recommendedAction: calculated.recommendedAction, reason: `${calculated.reason} (Grouped ${reportsCount} nearby citizen reports.)` });
-      } else {
-        issue = await this.createIssue({ ...issueInput, estimatedPopulationImpact: null });
-        issueCreated = true;
-      }
+      const issue = await this.createIssue({ ...issueInput, estimatedPopulationImpact: null });
       try {
-        const report = await this.createReport({ ...reportData, associatedIssueId: issue.id });
-        return { report, issue, issueCreated, idempotent: false };
+        const report = await this.createReport({ ...reportData, priorityScore: issue.priorityScore, priorityLevel: issue.priorityLevel || issue.riskLevel, priorityExplanation: issue.priorityExplanation || issue.reason, recommendedResponseHours: issue.recommendedResponseHours, associatedIssueId: issue.id, duplicateGroupId: issue.id });
+        return { report, issue, issueCreated: true, idempotent: false };
       } catch (error) {
-        this.memoryIssues = previousIssues;
+        this.memoryIssues.delete(issue.id);
         throw error;
       }
     }
@@ -348,28 +373,14 @@ class DataStoreService {
         const duplicate = await CitizenReportModel.findOne({ userId: reportData.userId, idempotencyKey });
         if (duplicate) return { report: duplicate, issue: await IssueModel.findOne({ id: duplicate.associatedIssueId }), issueCreated: false, idempotent: true };
       }
-      let priorIssue: any = null;
-      let changedIssue: any = null;
+      let createdIssue: any = null;
       try {
-        const matches = await IssueModel.find({ type: issueInput.type, status: { $ne: 'RESOLVED' }, latitude: { $gte: issueInput.latitude - 0.006, $lte: issueInput.latitude + 0.006 }, longitude: { $gte: issueInput.longitude - 0.006, $lte: issueInput.longitude + 0.006 } });
-        priorIssue = matches.find((candidate) => Math.hypot(candidate.latitude - issueInput.latitude, candidate.longitude - issueInput.longitude) <= 0.006) || null;
-        if (priorIssue) {
-          const count = (priorIssue.reportsCount || 1) + 1;
-          const calc = calculatePriorityScore({ type: priorIssue.type, severity: priorIssue.severity, reportsCount: count, estimatedPopulationImpact: priorIssue.estimatedPopulationImpact, nearbyInfrastructure: priorIssue.nearbyInfrastructure, createdAt: priorIssue.createdAt });
-          changedIssue = await IssueModel.findByIdAndUpdate(priorIssue._id, { $set: { reportsCount: count, priorityScore: calc.priorityScore, riskLevel: calc.riskLevel, priorityBreakdown: calc.breakdown, recommendedAction: calc.recommendedAction, reason: `${calc.reason} (Grouped ${count} nearby citizen reports.)` } }, { new: true, runValidators: true });
-        } else {
-          const calc = calculatePriorityScore({ type: issueInput.type, severity: issueInput.severity, reportsCount: 1, estimatedPopulationImpact: null, nearbyInfrastructure: issueInput.nearbyInfrastructure });
-          changedIssue = await IssueModel.create({ ...issueInput, id: `ISSUE-${randomBytes(12).toString('hex').toUpperCase()}`, reportsCount: 1, estimatedPopulationImpact: null, priorityScore: calc.priorityScore, riskLevel: calc.riskLevel, priorityBreakdown: calc.breakdown, recommendedAction: calc.recommendedAction, reason: calc.reason, status: 'NEW' });
-        }
-        const report = await CitizenReportModel.create({ ...reportData, reportId: this.generateReportId(), associatedIssueId: changedIssue.id, status: 'Submitted' });
-        return { report, issue: this.normalizeIssue(changedIssue), issueCreated: !priorIssue, idempotent: false };
+        const calc = calculatePriorityScore({ type: issueInput.type, severity: issueInput.severity, reportsCount: 1, estimatedPopulationImpact: null, nearbyInfrastructure: issueInput.nearbyInfrastructure, aiDetectedSeverity: issueInput.aiDetectedSeverity });
+        createdIssue = await IssueModel.create({ ...issueInput, id: `ISSUE-${randomBytes(12).toString('hex').toUpperCase()}`, reportsCount: 1, estimatedPopulationImpact: null, priorityScore: calc.priorityScore, riskLevel: calc.riskLevel, priorityBreakdown: calc.breakdown, recommendedAction: calc.recommendedAction, reason: calc.reason, priorityLevel: calc.priorityLevel, priorityExplanation: calc.priorityExplanation, recommendedResponseHours: calc.recommendedResponseHours, status: 'NEW' });
+        const report = await CitizenReportModel.create({ ...reportData, priorityScore: createdIssue.priorityScore, priorityLevel: createdIssue.priorityLevel || createdIssue.riskLevel, priorityExplanation: createdIssue.priorityExplanation || createdIssue.reason, recommendedResponseHours: createdIssue.recommendedResponseHours, reportId: this.generateReportId(), associatedIssueId: createdIssue.id, duplicateGroupId: createdIssue.id, status: 'Submitted', location: { type: 'Point', coordinates: [reportData.longitude, reportData.latitude] } });
+        return { report, issue: this.normalizeIssue(createdIssue), issueCreated: true, idempotent: false };
       } catch (sagaError) {
-        if (changedIssue) {
-          try {
-            if (priorIssue) await IssueModel.updateOne({ _id: priorIssue._id }, { $set: { reportsCount: priorIssue.reportsCount, priorityScore: priorIssue.priorityScore, riskLevel: priorIssue.riskLevel, priorityBreakdown: priorIssue.priorityBreakdown, recommendedAction: priorIssue.recommendedAction, reason: priorIssue.reason } }, { runValidators: true });
-            else await IssueModel.deleteOne({ _id: changedIssue._id });
-          } catch (rollbackError) { console.error(JSON.stringify({ level: 'error', event: 'complaint_saga_rollback_failed', detail: 'Manual reconciliation is required.' })); }
-        }
+        if (createdIssue) await IssueModel.deleteOne({ _id: createdIssue._id }).catch(() => console.error(JSON.stringify({ level: 'error', event: 'complaint_saga_rollback_failed', detail: 'Manual reconciliation is required.' })));
         this.logDatabaseError('create complaint with reconciliation', sagaError);
       }
     } finally {
@@ -401,7 +412,88 @@ class DataStoreService {
     return updated;
   }
 
-  public async updateIssueAndAssociatedReports(id: string, updates: Record<string, unknown>): Promise<{ issue: any; reports: any[] } | null> {
+  public async linkDuplicateReports(sourceReportId: string, targetReportId: string, actor: { id: string; role: string }): Promise<{ source: any; target: any } | null> {
+    this.ensureAvailable();
+    const source = await this.getReportById(sourceReportId), target = await this.getReportById(targetReportId);
+    if (!source || !target || source.issueType !== target.issueType) return null;
+    const issueId = source.associatedIssueId || target.associatedIssueId;
+    if (!issueId) return null;
+    const targetIssueId = target.associatedIssueId;
+    const timestamp = new Date();
+    if (this.demoMode) {
+      for (const item of [source, target]) {
+        const current = this.memoryReports.get(item.reportId);
+        const linked = { ...current, associatedIssueId: issueId, duplicateGroupId: issueId, duplicateLinkedReportIds: [...new Set([...(current.duplicateLinkedReportIds || []), item.reportId === sourceReportId ? targetReportId : sourceReportId])], updatedAt: timestamp,
+          history: [...(current.history || []), { action: 'duplicate_linked', note: `Linked with ${item.reportId === sourceReportId ? targetReportId : sourceReportId}`, actorId: actor.id, actorRole: actor.role, createdAt: timestamp }] };
+        this.memoryReports.set(item.reportId, linked);
+      }
+      const linkedSource = this.memoryReports.get(sourceReportId), linkedTarget = this.memoryReports.get(targetReportId);
+      const groupReports = [...this.memoryReports.values()].filter((report) => report.associatedIssueId === issueId);
+      const issue = await this.getIssueById(issueId);
+      if (issue) {
+        const priority = calculatePriorityScore({ type: issue.type, severity: issue.severity, reportsCount: groupReports.length, estimatedPopulationImpact: issue.estimatedPopulationImpact, nearbyInfrastructure: issue.nearbyInfrastructure, createdAt: issue.createdAt, aiDetectedSeverity: issue.aiDetectedSeverity, verifiedVisualEvidence: issue.verifiedVisualEvidence });
+        await this.updateIssue(issueId, { reportsCount: groupReports.length, priorityScore: priority.priorityScore, riskLevel: priority.riskLevel, priorityLevel: priority.priorityLevel, priorityBreakdown: priority.breakdown, priorityExplanation: priority.priorityExplanation, recommendedResponseHours: priority.recommendedResponseHours, recommendedAction: priority.recommendedAction, reason: priority.priorityExplanation });
+      }
+      if (targetIssueId && targetIssueId !== issueId && ![...this.memoryReports.values()].some((report) => report.associatedIssueId === targetIssueId)) this.memoryIssues.delete(targetIssueId);
+      return { source: linkedSource, target: linkedTarget };
+    }
+    let session: ClientSession | undefined;
+    try {
+      session = await mongoose.startSession();
+      let result: { source: any; target: any } | null = null;
+      await session.withTransaction(async () => {
+        const linkedSource = await CitizenReportModel.findOneAndUpdate({ reportId: sourceReportId }, { $set: { associatedIssueId: issueId, duplicateGroupId: issueId }, $addToSet: { duplicateLinkedReportIds: targetReportId }, $push: { history: { action: 'duplicate_linked', note: `Linked with ${targetReportId}`, actorId: actor.id, actorRole: actor.role, createdAt: timestamp } } }, { new: true, runValidators: true, session });
+        const linkedTarget = await CitizenReportModel.findOneAndUpdate({ reportId: targetReportId }, { $set: { associatedIssueId: issueId, duplicateGroupId: issueId }, $addToSet: { duplicateLinkedReportIds: sourceReportId }, $push: { history: { action: 'duplicate_linked', note: `Linked with ${sourceReportId}`, actorId: actor.id, actorRole: actor.role, createdAt: timestamp } } }, { new: true, runValidators: true, session });
+        if (!linkedSource || !linkedTarget) throw new Error('DUPLICATE_REPORT_NOT_FOUND');
+        const count = await CitizenReportModel.countDocuments({ associatedIssueId: issueId }).session(session!);
+        const issue = await IssueModel.findOne({ id: issueId }).session(session!);
+        if (issue) {
+          const priority = calculatePriorityScore({ type: issue.type, severity: issue.severity, reportsCount: count, estimatedPopulationImpact: issue.estimatedPopulationImpact, nearbyInfrastructure: issue.nearbyInfrastructure, createdAt: issue.createdAt, aiDetectedSeverity: issue.aiDetectedSeverity, verifiedVisualEvidence: issue.verifiedVisualEvidence });
+          await IssueModel.updateOne({ id: issueId }, { $set: { reportsCount: count, priorityScore: priority.priorityScore, riskLevel: priority.riskLevel, priorityLevel: priority.priorityLevel, priorityBreakdown: priority.breakdown, priorityExplanation: priority.priorityExplanation, recommendedResponseHours: priority.recommendedResponseHours, recommendedAction: priority.recommendedAction, reason: priority.priorityExplanation } }, { session });
+        }
+        if (targetIssueId && targetIssueId !== issueId && !await CitizenReportModel.exists({ associatedIssueId: targetIssueId }).session(session!)) await IssueModel.deleteOne({ id: targetIssueId }, { session });
+        result = { source: linkedSource, target: linkedTarget };
+      });
+      return result;
+    } catch (error: any) {
+      if (!this.isUnsupportedTransaction(error)) return this.logDatabaseError('link duplicate complaints', error);
+      try {
+        const sourceBefore = await CitizenReportModel.findOne({ reportId: sourceReportId });
+        const targetBefore = await CitizenReportModel.findOne({ reportId: targetReportId });
+        if (!sourceBefore || !targetBefore) return null;
+        const linkedSource = await CitizenReportModel.findOneAndUpdate({ reportId: sourceReportId }, { $set: { associatedIssueId: issueId, duplicateGroupId: issueId }, $addToSet: { duplicateLinkedReportIds: targetReportId }, $push: { history: { action: 'duplicate_linked', note: `Linked with ${targetReportId}`, actorId: actor.id, actorRole: actor.role, createdAt: timestamp } } }, { new: true, runValidators: true });
+        const linkedTarget = await CitizenReportModel.findOneAndUpdate({ reportId: targetReportId }, { $set: { associatedIssueId: issueId, duplicateGroupId: issueId }, $addToSet: { duplicateLinkedReportIds: sourceReportId }, $push: { history: { action: 'duplicate_linked', note: `Linked with ${sourceReportId}`, actorId: actor.id, actorRole: actor.role, createdAt: timestamp } } }, { new: true, runValidators: true });
+        const count = await CitizenReportModel.countDocuments({ associatedIssueId: issueId });
+        const issue = await IssueModel.findOne({ id: issueId });
+        if (issue) {
+          const priority = calculatePriorityScore({ type: issue.type, severity: issue.severity, reportsCount: count, estimatedPopulationImpact: issue.estimatedPopulationImpact, nearbyInfrastructure: issue.nearbyInfrastructure, createdAt: issue.createdAt, aiDetectedSeverity: issue.aiDetectedSeverity, verifiedVisualEvidence: issue.verifiedVisualEvidence });
+          await IssueModel.updateOne({ id: issueId }, { $set: { reportsCount: count, priorityScore: priority.priorityScore, riskLevel: priority.riskLevel, priorityLevel: priority.priorityLevel, priorityBreakdown: priority.breakdown, priorityExplanation: priority.priorityExplanation, recommendedResponseHours: priority.recommendedResponseHours, recommendedAction: priority.recommendedAction, reason: priority.priorityExplanation } });
+        }
+        if (targetIssueId && targetIssueId !== issueId && !await CitizenReportModel.exists({ associatedIssueId: targetIssueId })) await IssueModel.deleteOne({ id: targetIssueId });
+        return linkedSource && linkedTarget ? { source: linkedSource, target: linkedTarget } : null;
+      } catch (fallbackError) {
+        console.error(JSON.stringify({ level: 'error', event: 'duplicate_link_compensation_required', detail: 'Complaint link did not complete consistently.' }));
+        return this.logDatabaseError('link duplicate complaints with reconciliation', fallbackError);
+      }
+      return null;
+    } finally { await session?.endSession(); }
+  }
+
+  public async addResolutionEvidence(reportId: string, imagePath: string, note: string, actor: { id: string; role: string }): Promise<any | null> {
+    this.ensureAvailable();
+    const history = { action: 'resolution_evidence_added', note, actorId: actor.id, actorRole: actor.role, createdAt: new Date() };
+    if (this.demoMode) {
+      const report = this.memoryReports.get(reportId);
+      if (!report) return null;
+      const updated = { ...report, resolutionEvidence: [...(report.resolutionEvidence || []), imagePath], history: [...(report.history || []), history], updatedAt: new Date() };
+      this.memoryReports.set(reportId, updated);
+      return updated;
+    }
+    try { return await CitizenReportModel.findOneAndUpdate({ reportId }, { $push: { resolutionEvidence: imagePath, history } }, { new: true, runValidators: true }); }
+    catch (error) { this.logDatabaseError('add resolution evidence', error); }
+  }
+
+  public async updateIssueAndAssociatedReports(id: string, updates: Record<string, unknown>, actor: { id: string; role: string } = { id: 'system', role: 'system' }): Promise<{ issue: any; reports: any[] } | null> {
     this.ensureAvailable();
     const statusMap: Record<string, string> = { NEW: 'Submitted', VERIFIED: 'Under Review', ASSIGNED: 'Assigned', 'IN PROGRESS': 'In Progress', RESOLVED: 'Resolved' };
     const requestedStatus = updates.status as string | undefined;
@@ -409,6 +501,15 @@ class DataStoreService {
     if (requestedStatus && !reportStatus) throw new Error('Unsupported issue status');
     let resolvedAt: Date | null | undefined = requestedStatus === 'RESOLVED' ? new Date() : requestedStatus ? null : undefined;
     let nextUpdates: Record<string, unknown> = { ...updates, ...(resolvedAt !== undefined ? { resolvedAt } : {}) };
+    const workflowChanged = !!requestedStatus || updates.assignedUserId !== undefined || updates.assignedTeam !== undefined || updates.department !== undefined || updates.resolutionNotes !== undefined || updates.verifiedVisualEvidence !== undefined;
+    const reportSet: Record<string, unknown> = {};
+    if (reportStatus) reportSet.status = reportStatus;
+    if (resolvedAt !== undefined && reportStatus) reportSet.resolvedAt = resolvedAt;
+    if (updates.assignedUserId !== undefined) reportSet.assignedTo = updates.assignedUserId;
+    if (updates.department !== undefined) reportSet.department = updates.department;
+    if (updates.resolutionNotes !== undefined) reportSet.resolutionNotes = updates.resolutionNotes;
+    for (const field of ['priorityScore', 'priorityLevel', 'priorityExplanation', 'recommendedResponseHours'] as const) if (updates[field] !== undefined) reportSet[field] = updates[field];
+    const historyEntry = { action: requestedStatus ? `status_${String(requestedStatus).toLowerCase().replace(/\s+/g, '_')}` : updates.assignedUserId !== undefined ? 'assigned' : 'workflow_updated', note: String(updates.resolutionNotes || updates.assignedTeam || ''), actorId: actor.id, actorRole: actor.role, createdAt: new Date() };
     if (this.demoMode) {
       const existingIssue = await this.getIssueById(id);
       if (requestedStatus === 'RESOLVED' && existingIssue?.resolvedAt) {
@@ -418,10 +519,10 @@ class DataStoreService {
       const issue = await this.updateIssue(id, nextUpdates as Partial<IIssue>);
       if (!issue) return null;
       const reports: any[] = [];
-      if (reportStatus) {
+      if (workflowChanged) {
         for (const [reportId, existing] of this.memoryReports) {
           if (existing.associatedIssueId === id) {
-            const updated = { ...existing, status: reportStatus, resolvedAt, updatedAt: new Date() };
+            const updated = { ...existing, ...reportSet, history: [...(existing.history || []), historyEntry], updatedAt: new Date() };
             this.memoryReports.set(reportId, updated);
             reports.push(updated);
           }
@@ -445,10 +546,10 @@ class DataStoreService {
         const issue = await IssueModel.findOneAndUpdate(query, { $set: nextUpdates }, { session, new: true, runValidators: true });
         if (!issue) { result = null; return; }
         let reports: any[] = [];
-        if (reportStatus) {
+        if (workflowChanged) {
           const filter = { associatedIssueId: issue.id };
-          reports = (await CitizenReportModel.find(filter).session(session!)).map((report) => ({ ...report.toObject(), status: reportStatus, resolvedAt }));
-          await CitizenReportModel.updateMany(filter, { $set: { status: reportStatus, resolvedAt } }, { session, runValidators: true });
+          reports = (await CitizenReportModel.find(filter).session(session!)).map((report) => ({ ...report.toObject(), ...reportSet, history: [...(report.history || []), historyEntry] }));
+          await CitizenReportModel.updateMany(filter, { $set: reportSet, $push: { history: historyEntry } }, { session, runValidators: true });
         }
         result = { issue: this.normalizeIssue(issue), reports };
       });
@@ -464,12 +565,12 @@ class DataStoreService {
         nextUpdates = { ...updates, resolvedAt };
       }
       const filter = { associatedIssueId: priorIssue.id };
-      const priorReports = reportStatus ? await CitizenReportModel.find(filter) : [];
+      const priorReports = workflowChanged ? await CitizenReportModel.find(filter) : [];
       const issue = await IssueModel.findOneAndUpdate(query, { $set: nextUpdates }, { new: true, runValidators: true });
       if (!issue) return null;
       try {
-        if (reportStatus) await CitizenReportModel.updateMany(filter, { $set: { status: reportStatus, resolvedAt } }, { runValidators: true });
-        return { issue: this.normalizeIssue(issue), reports: priorReports.map((report) => ({ ...report.toObject(), status: reportStatus ?? report.status, resolvedAt: reportStatus ? resolvedAt : report.resolvedAt })) };
+        if (workflowChanged) await CitizenReportModel.updateMany(filter, { $set: reportSet, $push: { history: historyEntry } }, { runValidators: true });
+        return { issue: this.normalizeIssue(issue), reports: priorReports.map((report) => ({ ...report.toObject(), ...reportSet, history: [...(report.history || []), historyEntry] })) };
       } catch (writeError) {
         try {
           const previous = priorIssue.toObject();
@@ -511,9 +612,13 @@ class DataStoreService {
   }
 
   // --- ANALYTICS ---
-  public async getAnalytics(): Promise<any> {
-    const issues = await this.getIssues();
-    const reports = await this.getReports();
+  public async getAnalytics(scope?: { id: string; department?: string }): Promise<any> {
+    let issues = await this.getIssues();
+    let reports = await this.getReports();
+    if (scope) {
+      issues = issues.filter((issue) => issue.assignedUserId === scope.id || (scope.department && issue.department === scope.department) || (!issue.department && !issue.assignedUserId));
+      reports = reports.filter((report) => report.assignedTo === scope.id || (scope.department && report.department === scope.department) || (!report.department && !report.assignedTo));
+    }
     const streets = await this.getStreets();
 
     const activeIssues = issues.filter((i) => i.status !== 'RESOLVED');
@@ -543,6 +648,28 @@ class DataStoreService {
       complaintCategoryMap[report.issueType] = (complaintCategoryMap[report.issueType] || 0) + 1;
       complaintSeverityMap[report.severity] = (complaintSeverityMap[report.severity] || 0) + 1;
     });
+    const unresolved = reports.filter((report) => report.status !== 'Resolved');
+    const unresolvedByArea = new Map<string, number>();
+    const workload = new Map<string, { assigned: number; open: number; resolved: number }>();
+    const unresolvedByCategory = new Map<string, number>();
+    for (const report of unresolved) {
+      const area = String(report.streetName || 'Area not specified');
+      unresolvedByArea.set(area, (unresolvedByArea.get(area) || 0) + 1);
+      unresolvedByCategory.set(report.issueType, (unresolvedByCategory.get(report.issueType) || 0) + 1);
+    }
+    for (const issue of issues) {
+      const assignee = issue.assignedUserId || issue.assignedTeam || 'Unassigned';
+      const item = workload.get(assignee) || { assigned: 0, open: 0, resolved: 0 };
+      item.assigned += issue.assignedUserId || issue.assignedTeam ? 1 : 0;
+      item.open += issue.status === 'RESOLVED' ? 0 : 1;
+      item.resolved += issue.status === 'RESOLVED' ? 1 : 0;
+      workload.set(assignee, item);
+    }
+    const possibleDuplicateReports = reports.filter((report) => Array.isArray(report.possibleDuplicateReportIds) && report.possibleDuplicateReportIds.length > 0).length;
+    const confirmedDuplicateLinkedReports = reports.filter((report) => Array.isArray(report.duplicateLinkedReportIds) && report.duplicateLinkedReportIds.length > 0).length;
+    const floodCategories = new Set(['Waterlogging', 'Blocked Drainage']);
+    const floodObservations = reports.filter((report) => floodCategories.has(report.issueType));
+    const hotspots = await this.getComplaintHotspots(300, reports);
 
     // Risk distribution
     const riskMap = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
@@ -566,7 +693,7 @@ class DataStoreService {
       pendingComplaints: reports.filter((r) => r.status !== 'Resolved').length,
       resolvedComplaints: reports.filter((r) => r.status === 'Resolved').length,
       complaintStatusDistribution: Object.entries(complaintStatusMap).map(([name, count]) => ({ name, count })),
-      dataSource: this.getMode(),
+      dataSource: this.getDataSource(),
       totalPopulationImpacted: totalImpact,
       categoryDistribution: categoryData,
       issueCategoryDistribution: categoryData,
@@ -575,6 +702,12 @@ class DataStoreService {
       riskDistribution: riskData,
       streetsMonitored: streets.length,
       populationImpactComplete: totalImpact !== null,
+      areaComplaintDensity: [...unresolvedByArea.entries()].map(([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count),
+      complaintHotspots: hotspots,
+      unresolvedComplaintSummary: { total: unresolved.length, byArea: [...unresolvedByArea.entries()].map(([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count).slice(0, 10), byCategory: [...unresolvedByCategory.entries()].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count) },
+      staffWorkload: [...workload.entries()].map(([assignee, counts]) => ({ assignee, ...counts })),
+      duplicateComplaintStatistics: { possibleDuplicateReports, confirmedDuplicateLinkedReports },
+      floodRiskSummary: { historicalFloodRelatedComplaints: floodObservations.length, openFloodRelatedComplaints: floodObservations.filter((report) => report.status !== 'Resolved').length, byCategory: [...floodCategories].map((category) => ({ category, count: reports.filter((report) => report.issueType === category).length })), source: 'historical_complaint_records', currentSensorDataAvailable: false, elevationDataAvailable: false },
     };
   }
 

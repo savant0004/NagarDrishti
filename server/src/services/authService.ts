@@ -4,10 +4,10 @@ import { UserModel, UserRole } from '../models/User';
 import { store } from './store';
 
 const scrypt = promisify(scryptCallback);
-const demoUsersById = new Map<string, { id: string; name: string; email: string; passwordHash: string; role: UserRole }>();
+const demoUsersById = new Map<string, { id: string; name: string; email: string; passwordHash: string; role: UserRole; isActive: boolean; department?: string }>();
 const TOKEN_LIFETIME_SECONDS = 8 * 60 * 60;
 
-export interface PublicUser { id: string; name: string; email: string; role: UserRole; }
+export interface PublicUser { id: string; name: string; email: string; role: UserRole; department?: string; }
 export interface AuthTokenPayload { sub: string; iat: number; exp: number; }
 
 export class AuthServiceError extends Error {
@@ -35,7 +35,7 @@ async function verifyPassword(password: string, encoded: string): Promise<boolea
 }
 
 function publicUser(user: any): PublicUser {
-  return { id: String(user.id || user._id), name: user.name, email: user.email, role: user.role };
+  return { id: String(user.id || user._id), name: user.name, email: user.email, role: user.role, department: user.department || '' };
 }
 
 function encode(value: unknown): string { return Buffer.from(JSON.stringify(value)).toString('base64url'); }
@@ -78,7 +78,7 @@ export async function registerCitizen(name: string, email: string, password: str
   const passwordHash = await createPasswordHash(password);
   if (store.getMode() === 'demo') {
     if ([...demoUsersById.values()].some((user) => user.email === normalizedEmail)) throw new AuthServiceError('EMAIL_CONFLICT');
-    const user = { id: `demo-user-${randomBytes(12).toString('hex')}`, name: name.trim(), email: normalizedEmail, passwordHash, role: 'citizen' as const };
+    const user = { id: `demo-user-${randomBytes(12).toString('hex')}`, name: name.trim(), email: normalizedEmail, passwordHash, role: 'citizen' as const, isActive: true, department: '' };
     demoUsersById.set(user.id, user);
     return publicUser(user);
   }
@@ -91,18 +91,18 @@ export async function registerCitizen(name: string, email: string, password: str
   }
 }
 
-export async function createStaffUser(name: string, email: string, password: string, role: 'municipal_staff' | 'admin'): Promise<PublicUser> {
+export async function createStaffUser(name: string, email: string, password: string, role: 'municipal_staff' | 'admin', department = ''): Promise<PublicUser> {
   assertStoreAvailable();
   const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = await createPasswordHash(password);
   if (store.getMode() === 'demo') {
     if ([...demoUsersById.values()].some((user) => user.email === normalizedEmail)) throw new AuthServiceError('EMAIL_CONFLICT');
-    const user = { id: `demo-user-${randomBytes(12).toString('hex')}`, name: name.trim(), email: normalizedEmail, passwordHash, role };
+    const user = { id: `demo-user-${randomBytes(12).toString('hex')}`, name: name.trim(), email: normalizedEmail, passwordHash, role, department, isActive: true };
     demoUsersById.set(user.id, user);
     return publicUser(user);
   }
   try {
-    const user = await UserModel.create({ name: name.trim(), email: normalizedEmail, passwordHash, role });
+    const user = await UserModel.create({ name: name.trim(), email: normalizedEmail, passwordHash, role, department });
     return publicUser(user);
   } catch (error: any) {
     if (error?.code === 11000) throw new AuthServiceError('EMAIL_CONFLICT');
@@ -115,9 +115,9 @@ export async function authenticate(email: string, password: string): Promise<Pub
   const normalizedEmail = email.trim().toLowerCase();
   if (store.getMode() === 'demo') {
     const user = [...demoUsersById.values()].find((candidate) => candidate.email === normalizedEmail);
-    return user && await verifyPassword(password, user.passwordHash) ? publicUser(user) : null;
+    return user?.isActive !== false && user && await verifyPassword(password, user.passwordHash) ? publicUser(user) : null;
   }
-  const user = await UserModel.findOne({ email: normalizedEmail }).select('+passwordHash');
+  const user = await UserModel.findOne({ email: normalizedEmail, isActive: { $ne: false } }).select('+passwordHash');
   return user && await verifyPassword(password, user.passwordHash) ? publicUser(user) : null;
 }
 
@@ -125,10 +125,34 @@ export async function getUserById(id: string): Promise<PublicUser | null> {
   assertStoreAvailable();
   if (store.getMode() === 'demo') {
     const user = demoUsersById.get(id);
-    return user ? publicUser(user) : null;
+    return user && user.isActive !== false ? publicUser(user) : null;
   }
-  const user = await UserModel.findById(id);
+  const user = await UserModel.findOne({ _id: id, isActive: { $ne: false } });
   return user ? publicUser(user) : null;
+}
+
+export async function getUsersByRole(roles: UserRole[]): Promise<PublicUser[]> {
+  assertStoreAvailable();
+  if (store.getMode() === 'demo') return [...demoUsersById.values()].filter((user) => user.isActive !== false && roles.includes(user.role)).map(publicUser);
+  return (await UserModel.find({ role: { $in: roles }, isActive: { $ne: false } })).map(publicUser);
+}
+
+export async function listStaffUsers(): Promise<Array<PublicUser & { isActive: boolean }>> {
+  assertStoreAvailable();
+  if (store.getMode() === 'demo') return [...demoUsersById.values()].filter((user) => user.role !== 'citizen').map((user) => ({ ...publicUser(user), isActive: user.isActive !== false }));
+  return (await UserModel.find({ role: { $in: ['municipal_staff', 'admin'] } }).sort({ name: 1 })).map((user) => ({ ...publicUser(user), isActive: user.isActive !== false }));
+}
+
+export async function setStaffActive(id: string, isActive: boolean): Promise<boolean> {
+  assertStoreAvailable();
+  if (store.getMode() === 'demo') {
+    const user = demoUsersById.get(id);
+    if (!user || user.role === 'citizen' || user.role === 'admin' && !isActive) return false;
+    user.isActive = isActive;
+    return true;
+  }
+  const user = await UserModel.findOneAndUpdate({ _id: id, role: 'municipal_staff' }, { $set: { isActive } }, { new: true });
+  return !!user;
 }
 
 export async function ensureDemoAdmin(): Promise<boolean> {
@@ -137,7 +161,7 @@ export async function ensureDemoAdmin(): Promise<boolean> {
   const password = process.env.DEMO_ADMIN_PASSWORD;
   if (!email || !password || password.length < 12 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
   if ([...demoUsersById.values()].some((user) => user.email === email)) return true;
-  const user = { id: 'demo-admin', name: 'NagarDrishti Demo Administrator', email, passwordHash: await createPasswordHash(password), role: 'admin' as const };
+    const user = { id: 'demo-admin', name: 'NagarDrishti Demo Administrator', email, passwordHash: await createPasswordHash(password), role: 'admin' as const, isActive: true, department: '' };
   demoUsersById.set(user.id, user);
   return true;
 }

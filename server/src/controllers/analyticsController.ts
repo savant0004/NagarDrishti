@@ -1,9 +1,15 @@
 import { Request, Response } from 'express';
 import { store } from '../services/store';
+import { AuthenticatedRequest } from '../middleware/auth';
 
 export async function getAnalytics(req: Request, res: Response) {
   try {
-    const analytics = await store.getAnalytics();
+    const user = (req as AuthenticatedRequest).authUser;
+    const analytics = await store.getAnalytics(user?.role === 'municipal_staff' ? { id: user.id, department: user.department } : undefined);
+    if (!user || user.role === 'citizen') {
+      delete analytics.staffWorkload;
+      analytics.complaintHotspots = (analytics.complaintHotspots || []).map((spot: any) => ({ ...spot, latitude: Math.round(Number(spot.latitude) * 1000) / 1000, longitude: Math.round(Number(spot.longitude) * 1000) / 1000 }));
+    }
     return res.json({ success: true, data: analytics });
   } catch (err: any) {
     const unavailable = String(err?.message || '').includes('MongoDB is unavailable') || String(err?.message || '').includes('DEMO_MODE is disabled');

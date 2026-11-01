@@ -1,5 +1,7 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { useBackendHealth } from '../contexts/BackendHealthContext';
 import {
   LayoutDashboard,
   Layers,
@@ -7,21 +9,44 @@ import {
   FileText,
   BarChart3,
   Activity,
-  Home,
   ShieldCheck,
   Zap,
   Search,
+  Bot,
 } from 'lucide-react';
 
 export function Sidebar() {
+  const { user } = useAuth();
+  const { readiness, loading, error } = useBackendHealth();
+  const modeLabel = loading ? 'Checking database status…'
+    : error || !readiness ? 'Database unavailable'
+      : readiness.applicationMode === 'demo' ? 'Demo Mode · Sample records'
+      : readiness.dataSource === 'demo' ? readiness.database.status === 'connected' ? 'Demo Database · MongoDB CONNECTED'
+        : readiness.database.status === 'connecting' ? 'Demo Database · CONNECTING'
+          : 'Demo Database · DATABASE UNAVAILABLE'
+      : readiness.applicationMode === 'live' ? readiness.database.status === 'connected' ? 'Live Mode · DATABASE CONNECTED'
+        : readiness.database.status === 'connecting' ? 'Live Mode · CONNECTING'
+          : 'Live Mode · DATABASE UNAVAILABLE'
+        : 'Application mode unavailable';
+  const modeDetail = loading ? 'Checking the backend health endpoint.'
+    : error || !readiness ? 'Backend health could not be confirmed; database state is unavailable.'
+    : readiness.applicationMode === 'demo' ? 'Sample Bengaluru records are in memory and reset when the backend restarts.'
+      : readiness.dataSource === 'demo' ? 'Seeded Bengaluru sample records are stored in the isolated nagardrishti_demo database.'
+      : readiness.applicationMode === 'live' ? readiness.database.status === 'connected' ? 'Connected to live MongoDB records.' : readiness.database.status === 'connecting' ? 'MongoDB connection is being established or retried.' : 'Live database is unavailable; demo data is not being substituted.'
+        : 'API data is currently unavailable.';
+  const modeClass = !loading && !error && readiness?.database.status === 'connected' && readiness.applicationMode !== 'demo' ? 'text-emerald-400'
+    : loading || readiness?.applicationMode === 'demo' || readiness?.database.status === 'connecting' ? 'text-amber-300'
+      : 'text-red-300';
   const navItems = [
     { to: '/dashboard', label: 'Overview', icon: LayoutDashboard },
     { to: '/digital-twin', label: 'Digital Twin', icon: Layers },
     { to: '/simulator', label: 'Scenario Simulator', icon: Sliders, badge: 'What If?' },
     { to: '/analytics', label: 'Analytics', icon: BarChart3 },
     { to: '/street-health', label: 'Street Health', icon: Activity },
-    { to: '/reports-list', label: 'Citizen Reports', icon: FileText },
+    ...(user && ['admin', 'municipal_staff'].includes(user.role) ? [{ to: '/reports-list', label: 'Citizen Reports', icon: FileText }] : []),
     { to: '/tracker', label: 'Track My Report', icon: Search },
+    { to: '/assistant', label: 'AI Assistant', icon: Bot },
+    ...(user?.role === 'admin' ? [{ to: '/staff', label: 'Staff Management', icon: ShieldCheck }] : []),
   ];
 
   return (
@@ -39,20 +64,6 @@ export function Sidebar() {
 
       {/* Navigation */}
       <div className="p-4 space-y-1 flex-1 overflow-y-auto">
-        <NavLink
-          to="/"
-          className={({ isActive }) =>
-            `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
-              isActive
-                ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20 font-bold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`
-          }
-        >
-          <Home className="w-4 h-4" />
-          <span>Landing Page</span>
-        </NavLink>
-
         <div className="pt-4 pb-2 px-3 text-[10px] uppercase font-bold tracking-widest text-slate-500">
           Command Dashboard
         </div>
@@ -87,12 +98,12 @@ export function Sidebar() {
 
       {/* Hackathon Demo Notice Footer */}
       <div className="p-4 border-t border-slate-800 bg-slate-950/60 m-3 rounded-xl">
-        <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold mb-1">
+        <div className={`flex items-center gap-2 ${modeClass} text-xs font-bold mb-1`}>
           <ShieldCheck className="w-4 h-4" />
-          <span>Hackathon Demo Mode</span>
+          <span>{modeLabel}</span>
         </div>
         <p className="text-[11px] text-slate-400 leading-tight">
-          Data shown is simulated unless otherwise connected to live municipal sensors.
+          {modeDetail}
         </p>
       </div>
     </aside>

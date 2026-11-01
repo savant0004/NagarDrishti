@@ -12,6 +12,8 @@ import streetRoutes from './routes/streetRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
 import simulationRoutes from './routes/simulationRoutes';
 import authRoutes from './routes/authRoutes';
+import assistantRoutes from './routes/assistantRoutes';
+import notificationRoutes from './routes/notificationRoutes';
 import { store } from './services/store';
 import { ensureDemoAdmin, getUserById, verifyToken } from './services/authService';
 import { requireAuth, requireRole } from './middleware/auth';
@@ -19,6 +21,8 @@ import { IssueModel } from './models/Issue';
 import { CitizenReportModel } from './models/CitizenReport';
 import { StreetModel } from './models/Street';
 import { UserModel } from './models/User';
+import { AssistantConversationModel } from './models/AssistantConversation';
+import { NotificationModel } from './models/Notification';
 
 const config = loadRuntimeConfig();
 const app = express();
@@ -36,6 +40,8 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 app.use('/api/auth', authRoutes);
+app.use('/api/assistant', assistantRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/issues', issueRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/streets', streetRoutes);
@@ -45,32 +51,48 @@ app.use('/api/simulation', simulationRoutes);
 let shuttingDown = false;
 let databaseEverConnected = false;
 let databaseIndexesInitialized = false;
-app.get('/api/health', (_req, res) => {
-  const database = store.getDatabaseState();
-  return res.status(shuttingDown ? 503 : 200).json({
-    success: !shuttingDown,
-    status: shuttingDown ? 'unavailable' : 'healthy',
-    kind: 'liveness',
-    applicationMode: config.demoMode ? 'demo' : config.mongoUri ? 'live' : 'unavailable',
-    database: { status: database, ready: store.isReady(), mongoReadyState: mongoose.connection.readyState },
+let firstMongoAttemptSettled = false;
+let finishFirstMongoAttempt!: () => void;
+const firstMongoAttempt = new Promise<void>((resolve) => { finishFirstMongoAttempt = resolve; });
+function settleFirstMongoAttempt() {
+  if (firstMongoAttemptSettled) return;
+  firstMongoAttemptSettled = true;
+  finishFirstMongoAttempt();
+}
+function getHealthSnapshot() {
+  const mongoReadyState = mongoose.connection.readyState;
+  const applicationMode = config.demoMode ? 'demo' : config.mongoUri ? 'live' : 'unavailable';
+  const databaseStatus = config.demoMode ? 'demo'
+    : mongoReadyState === 1 && store.getDatabaseState() === 'connected' && databaseIndexesInitialized ? 'connected'
+      : mongoReadyState === 2 || store.getDatabaseState() === 'connecting' ? 'connecting'
+        : 'unavailable';
+  const databaseReady = databaseStatus === 'connected';
+  const applicationReady = !shuttingDown && config.errors.length === 0 && (config.demoMode || databaseReady);
+  const status = shuttingDown || config.errors.length > 0 || databaseStatus === 'unavailable' ? 'unavailable'
+    : databaseStatus === 'connecting' ? 'connecting'
+      : config.demoMode ? 'degraded' : 'healthy';
+  return {
+    success: applicationReady,
+    status,
+    applicationMode,
+    dataSource: store.getDataSource(),
+    applicationReady,
+    database: { status: databaseStatus, ready: databaseReady, mongoReadyState },
     configurationValid: config.errors.length === 0,
     timestamp: new Date(),
-  });
+  };
+}
+
+// Both endpoints return the same authoritative database state. /health remains a
+// liveness endpoint; /ready additionally returns 503 when the application cannot serve data.
+app.get('/api/health', (_req, res) => {
+  const health = getHealthSnapshot();
+  return res.status(shuttingDown ? 503 : 200).json({ ...health, kind: 'liveness' });
 });
 
 app.get('/api/ready', (_req, res) => {
-  const ready = !shuttingDown && config.errors.length === 0 && store.isReady();
-  const database = store.getDatabaseState();
-  const status = shuttingDown || config.errors.length ? 'unavailable' : config.demoMode ? 'degraded' : database;
-  return res.status(ready ? 200 : 503).json({
-    success: ready,
-    status,
-    kind: 'readiness',
-    applicationMode: config.demoMode ? 'demo' : config.mongoUri ? 'live' : 'unavailable',
-    database: { status: database, ready: store.isReady(), mongoReadyState: mongoose.connection.readyState },
-    configurationErrors: config.errors,
-    timestamp: new Date(),
-  });
+  const health = getHealthSnapshot();
+  return res.status(health.applicationReady ? 200 : 503).json({ ...health, kind: 'readiness' });
 });
 
 app.post('/api/seed', requireAuth, requireRole('admin'), async (_req, res) => {
@@ -109,6 +131,7 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const user = socket.data.user as { id: string; role: string };
+  socket.join(`user:${user.id}`);
   if (user.role === 'admin' || user.role === 'municipal_staff') socket.join('staff');
   else socket.join(`reporter:${user.id}`);
   console.log(JSON.stringify({ level: 'info', event: 'socket_connected', role: user.role }));
@@ -122,11 +145,16 @@ async function connectMongoUntilShutdown() {
     attempt += 1;
     store.setDatabaseState('connecting');
     try {
-      await mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 4000, socketTimeoutMS: 20000, maxPoolSize: 20 });
-      await Promise.all([IssueModel.init(), CitizenReportModel.init(), StreetModel.init(), UserModel.init()]);
+      await mongoose.connect(config.mongoUri, { dbName: config.mongoDatabaseName, serverSelectionTimeoutMS: 4000, socketTimeoutMS: 20000, maxPoolSize: 20 });
+      await Promise.all([IssueModel.init(), CitizenReportModel.init(), StreetModel.init(), UserModel.init(), AssistantConversationModel.init(), NotificationModel.init()]);
+      await Promise.all([
+        IssueModel.updateMany({ location: { $exists: false } }, [{ $set: { location: { type: 'Point', coordinates: ['$longitude', '$latitude'] } } }]),
+        CitizenReportModel.updateMany({ location: { $exists: false } }, [{ $set: { location: { type: 'Point', coordinates: ['$longitude', '$latitude'] } } }]),
+      ]);
       databaseIndexesInitialized = true;
       databaseEverConnected = true;
       store.setDatabaseState('connected');
+      settleFirstMongoAttempt();
       console.log(JSON.stringify({ level: 'info', event: 'mongodb_connected' }));
       while (!shuttingDown && mongoose.connection.readyState === 1) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -136,6 +164,7 @@ async function connectMongoUntilShutdown() {
       console.error(JSON.stringify({ level: 'error', event: 'mongodb_disconnected', retrying: true }));
     } catch {
       store.setDatabaseState(databaseEverConnected ? 'degraded' : 'unavailable');
+      settleFirstMongoAttempt();
       console.error(JSON.stringify({ level: 'error', event: 'mongodb_connection_failed', attempt, retrying: true }));
       await mongoose.disconnect().catch(() => undefined);
       await new Promise((resolve) => setTimeout(resolve, Math.min(10000, 1000 * attempt)));
@@ -151,8 +180,6 @@ mongoose.connection.on('error', () => console.error(JSON.stringify({ level: 'err
 if (config.errors.length) {
   console.error(JSON.stringify({ level: 'error', event: 'configuration_invalid', errors: config.errors }));
   store.setDatabaseState('unavailable');
-} else if (!config.demoMode) {
-  void connectMongoUntilShutdown();
 }
 
 function listenServer() {
@@ -163,8 +190,14 @@ if (config.demoMode) {
     if (!adminReady) console.warn(JSON.stringify({ level: 'warn', event: 'demo_admin_not_configured' }));
     console.log(JSON.stringify({ level: 'info', event: 'demo_mode_enabled' }));
   }).catch(() => console.error(JSON.stringify({ level: 'error', event: 'demo_admin_initialization_failed' }))).finally(listenServer);
-} else {
+} else if (config.errors.length) {
   listenServer();
+} else {
+  // Do not accept application traffic until the initial Mongo connection/index setup
+  // has either succeeded or timed out once. On failure, serve health/readiness while
+  // the background connection manager continues retrying.
+  void connectMongoUntilShutdown();
+  void firstMongoAttempt.then(() => { if (!shuttingDown) listenServer(); });
 }
 
 let shutdownPromise: Promise<void> | undefined;

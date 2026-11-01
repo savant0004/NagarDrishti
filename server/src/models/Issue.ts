@@ -37,6 +37,7 @@ export interface IIssue extends Document {
   severity: IssueSeverity;
   latitude: number;
   longitude: number;
+  location: { type: 'Point'; coordinates: [number, number] };
   streetName: string;
   status: IssueStatus;
   priorityScore: number;
@@ -56,6 +57,14 @@ export interface IIssue extends Document {
     weatherRisk: number;
   };
   assignedTeam?: string;
+  assignedUserId?: string;
+  department?: string;
+  resolutionNotes?: string;
+  verifiedVisualEvidence?: boolean;
+  aiDetectedSeverity?: IssueSeverity;
+  priorityLevel?: RiskLevel;
+  priorityExplanation?: string;
+  recommendedResponseHours?: number;
   createdAt: Date;
   updatedAt: Date;
   resolvedAt?: Date | null;
@@ -70,6 +79,7 @@ const IssueSchema: Schema = new Schema(
     severity: { type: String, required: true, enum: ISSUE_SEVERITIES, default: 'Medium' },
     latitude: { type: Number, required: true, min: -90, max: 90 },
     longitude: { type: Number, required: true, min: -180, max: 180 },
+    location: { type: { type: String, enum: ['Point'], default: 'Point' }, coordinates: { type: [Number], default: undefined } },
     streetName: { type: String, required: true },
     status: { type: String, required: true, enum: ISSUE_STATUSES, default: 'NEW' },
     priorityScore: { type: Number, required: true, default: 50 },
@@ -97,8 +107,22 @@ const IssueSchema: Schema = new Schema(
       weatherRisk: { type: Number, default: 0 },
     },
     assignedTeam: { type: String, default: '' },
+    assignedUserId: { type: String, default: '' },
+    department: { type: String, default: '' },
+    resolutionNotes: { type: String, default: '', maxlength: 3000 },
+    verifiedVisualEvidence: { type: Boolean, default: false },
+    aiDetectedSeverity: { type: String, enum: ISSUE_SEVERITIES },
+    priorityLevel: { type: String, enum: RISK_LEVELS, default: 'MEDIUM' },
+    priorityExplanation: { type: String, maxlength: 1000, default: '' },
+    recommendedResponseHours: { type: Number, min: 0, default: 72 },
   },
   { timestamps: true }
 );
+
+IssueSchema.pre('validate', function () {
+  const issue = this as unknown as IIssue;
+  if (Number.isFinite(issue.latitude) && Number.isFinite(issue.longitude)) issue.location = { type: 'Point', coordinates: [issue.longitude, issue.latitude] };
+});
+IssueSchema.index({ location: '2dsphere' });
 
 export const IssueModel = mongoose.model<IIssue>('Issue', IssueSchema);

@@ -13,11 +13,25 @@ export interface ICitizenReport extends Document {
   image?: string;
   latitude: number;
   longitude: number;
+  location: { type: 'Point'; coordinates: [number, number] };
   streetName: string;
   severity: IssueSeverity;
   status: ReportStatus;
   contactEmail?: string;
   associatedIssueId?: string;
+  duplicateGroupId?: string;
+  possibleDuplicateReportIds?: string[];
+  duplicateLinkedReportIds?: string[];
+  imageHash?: string;
+  department?: string;
+  assignedTo?: string;
+  resolutionNotes?: string;
+  resolutionEvidence?: string[];
+  history?: Array<{ action: string; note?: string; actorId: string; actorRole: string; createdAt: Date }>;
+  priorityScore?: number;
+  priorityLevel?: string;
+  priorityExplanation?: string;
+  recommendedResponseHours?: number;
   userId: string;
   resolvedAt?: Date | null;
   idempotencyKey?: string;
@@ -43,7 +57,7 @@ export interface ICitizenReport extends Document {
   updatedAt: Date;
 }
 
-const CitizenReportSchema: Schema = new Schema(
+export const CitizenReportSchema: Schema = new Schema(
   {
     reportId: { type: String, required: true, unique: true },
     issueType: { type: String, required: true, enum: REPORT_CATEGORIES },
@@ -51,6 +65,20 @@ const CitizenReportSchema: Schema = new Schema(
     image: { type: String, default: '' },
     latitude: { type: Number, required: true, min: -90, max: 90 },
     longitude: { type: Number, required: true, min: -180, max: 180 },
+    location: { type: { type: String, enum: ['Point'], default: 'Point' }, coordinates: { type: [Number], default: undefined } },
+    duplicateGroupId: { type: String, default: '' },
+    possibleDuplicateReportIds: { type: [String], default: [] },
+    duplicateLinkedReportIds: { type: [String], default: [] },
+    imageHash: { type: String, default: '', index: true },
+    department: { type: String, default: '' },
+    assignedTo: { type: String, default: '' },
+    resolutionNotes: { type: String, default: '', maxlength: 3000 },
+    resolutionEvidence: { type: [String], default: [] },
+    history: [{ action: { type: String, required: true, maxlength: 80 }, note: { type: String, maxlength: 1000 }, actorId: { type: String, required: true }, actorRole: { type: String, required: true }, createdAt: { type: Date, default: Date.now } }],
+    priorityScore: { type: Number, min: 0, max: 100 },
+    priorityLevel: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
+    priorityExplanation: { type: String, maxlength: 1000 },
+    recommendedResponseHours: { type: Number, min: 0 },
     associatedIssueId: { type: String, default: '' },
     userId: { type: String, required: true, index: true },
     idempotencyKey: { type: String, default: undefined, maxlength: 128 },
@@ -81,6 +109,29 @@ const CitizenReportSchema: Schema = new Schema(
   { timestamps: true }
 );
 
+CitizenReportSchema.pre('validate', function () {
+  const report = this as unknown as ICitizenReport;
+  if (Number.isFinite(report.latitude) && Number.isFinite(report.longitude)) report.location = { type: 'Point', coordinates: [report.longitude, report.latitude] };
+});
+CitizenReportSchema.index({ location: '2dsphere' });
+
 CitizenReportSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } });
 
-export const CitizenReportModel = mongoose.model<ICitizenReport>('CitizenReport', CitizenReportSchema);
+function usesDemoComplaintCollection(): boolean {
+  try {
+    const uri = process.env.MONGO_DATABASE_MODE === 'demo' ? process.env.MONGO_DEMO_URI : process.env.MONGODB_URI;
+    const databaseName = new URL(uri || '').pathname.replace(/^\//, '').split('/')[0]
+      || (process.env.MONGO_DATABASE_MODE === 'demo' ? 'nagardrishti_demo' : process.env.MONGODB_DATABASE?.trim())
+      || 'nagardrishti_demo';
+    return databaseName === 'nagardrishti_demo';
+  } catch {
+    return false;
+  }
+}
+
+// Keep existing collection mapping for other databases; the isolated demo DB uses complaints.
+export const CitizenReportModel = mongoose.model<ICitizenReport>(
+  'CitizenReport',
+  CitizenReportSchema,
+  usesDemoComplaintCollection() ? 'complaints' : undefined,
+);

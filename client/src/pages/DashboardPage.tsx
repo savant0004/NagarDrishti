@@ -6,7 +6,7 @@ import { HeroCity3DScene } from '../components/HeroCity3D';
 import { IssueDetailModal } from '../components/IssueDetailModal';
 import { api } from '../services/api';
 import { getSocket } from '../services/socket';
-import { IIssue, IStreet, IssueStatus } from '../types';
+import { IIssue, IStreet, ICitizenReport, IssueStatus } from '../types';
 import {
   Layers,
   Box,
@@ -30,6 +30,7 @@ import {
 export function DashboardPage() {
   const [issues, setIssues] = useState<IIssue[]>([]);
   const [streets, setStreets] = useState<IStreet[]>([]);
+  const [reports, setReports] = useState<ICitizenReport[]>([]);
   const [selectedIssue, setSelectedIssue] = useState<IIssue | null>(null);
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
   const [filterSeverity, setFilterSeverity] = useState<string>('ALL');
@@ -43,7 +44,7 @@ export function DashboardPage() {
     setErrorMsg('');
     try {
       const [iss, str] = await Promise.all([api.getIssues(), api.getStreets()]);
-      setIssues(iss); setStreets(str);
+      setIssues(iss); setStreets(str); setReports([]);
     } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Unable to load dashboard data.'); }
     finally { setIsLoading(false); }
   };
@@ -67,22 +68,27 @@ export function DashboardPage() {
       setSelectedIssue((previous) => previous?.id === id ? null : previous);
     };
     const onReseeded = () => { void fetchData(); };
+    const upsertReport = (report: ICitizenReport) => setReports((previous) => [report, ...previous.filter((item) => item.reportId !== report.reportId)]);
     socket.on('issue:created', onIssueCreated);
     socket.on('issue:updated', onIssueUpdated);
     socket.on('issue:deleted', onIssueDeleted);
     socket.on('data:reseeded', onReseeded);
+    socket.on('report:created', upsertReport);
+    socket.on('report:updated', upsertReport);
 
     return () => {
       socket.off('issue:created', onIssueCreated);
       socket.off('issue:updated', onIssueUpdated);
       socket.off('issue:deleted', onIssueDeleted);
       socket.off('data:reseeded', onReseeded);
+      socket.off('report:created', upsertReport);
+      socket.off('report:updated', upsertReport);
     };
   }, []);
 
-  const handleUpdateStatus = async (id: string, status: IssueStatus, team?: string) => {
+  const handleUpdateStatus = async (id: string, status: IssueStatus, team?: string, workflow?: { assignedUserId?: string; resolutionNotes?: string }) => {
     try {
-      const updated = await api.updateIssueStatus(id, status, team);
+      const updated = await api.updateIssueStatus(id, status, team, workflow);
       if (updated) {
       setIssues((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
       setSelectedIssue(updated);
@@ -205,6 +211,7 @@ export function DashboardPage() {
                   streets={streets}
                   selectedIssue={selectedIssue}
                   onSelectIssue={(iss) => setSelectedIssue(iss)}
+                  reports={reports}
                 />
               ) : (
                 <HeroCity3DScene
@@ -212,6 +219,7 @@ export function DashboardPage() {
                   selectedIssue={selectedIssue}
                   onSelectIssue={(iss) => setSelectedIssue(iss)}
                   showHUD={true}
+                  reports={reports}
                 />
               )}
 

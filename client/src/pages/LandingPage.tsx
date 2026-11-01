@@ -31,11 +31,12 @@ export function LandingPage() {
 
   useEffect(() => {
     async function loadData() {
-      const [iss, str] = await Promise.all([api.getIssues(), api.getStreets()]);
-      setIssues(iss);
+      // Keep the public showcase map free of staff-only issue records.
+      const str = await api.getStreets();
+      setIssues([]);
       setStreets(str);
     }
-    loadData();
+    void loadData().catch(() => setStreets([]));
   }, []);
 
   return (

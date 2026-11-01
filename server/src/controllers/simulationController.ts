@@ -14,9 +14,10 @@ export async function runSimulation(req: Request, res: Response) {
     }
 
     const issues = await store.getIssues();
-    const result = runScenarioSimulation(params, issues);
+    const reports = await store.getReports();
+    const result = runScenarioSimulation(params, issues, reports);
 
-    return res.json({ success: true, data: result });
+    return res.json({ success: true, data: { ...result, applicationMode: store.getDataSource() } });
   } catch (err: any) {
     const unavailable = String(err?.message || '').includes('MongoDB is unavailable') || String(err?.message || '').includes('DEMO_MODE is disabled');
     if (!unavailable) console.error(JSON.stringify({ level: 'error', event: 'simulation_failed', errorName: err?.name || 'Error' }));

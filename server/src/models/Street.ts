@@ -12,6 +12,7 @@ export interface IStreet extends Document {
   longitude: number;
   activeIssuesCount: number;
   floodRiskPercent: number;
+  isDemo?: boolean;
 }
 
 const StreetSchema: Schema = new Schema(
@@ -27,6 +28,7 @@ const StreetSchema: Schema = new Schema(
     longitude: { type: Number, required: true, min: -180, max: 180 },
     activeIssuesCount: { type: Number, default: 0 },
     floodRiskPercent: { type: Number, default: 15 },
+    isDemo: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

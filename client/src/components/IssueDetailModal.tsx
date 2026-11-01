@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { IIssue, IssueStatus } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { api } from '../services/api';
 import {
   X,
   AlertTriangle,
@@ -21,18 +23,27 @@ import {
 interface IssueDetailModalProps {
   issue: IIssue | null;
   onClose: () => void;
-  onUpdateStatus: (id: string, newStatus: IssueStatus, team?: string) => void;
+  onUpdateStatus: (id: string, newStatus: IssueStatus, team?: string, workflow?: { assignedUserId?: string; resolutionNotes?: string }) => void;
 }
 
 export function IssueDetailModal({ issue, onClose, onUpdateStatus }: IssueDetailModalProps) {
   const [selectedTeam, setSelectedTeam] = useState(issue?.assignedTeam || 'Rapid Utility Response Squad');
   const [isUpdating, setIsUpdating] = useState(false);
+  const [staffId, setStaffId] = useState('');
+  const [resolutionNotes, setResolutionNotes] = useState(issue?.resolutionNotes || '');
+  const { user } = useAuth();
+  const [staff, setStaff] = useState<Array<{id: string; name: string; department?: string; isActive: boolean}>>([]);
+
+  useEffect(() => {
+    if (user?.role === 'admin') api.getStaffUsers().then(setStaff).catch(() => setStaff([]));
+    if (user?.role === 'municipal_staff') setStaffId(user.id);
+  }, [user?.id, user?.role]);
 
   if (!issue) return null;
 
   const handleStatusChange = async (status: IssueStatus) => {
     setIsUpdating(true);
-    await onUpdateStatus(issue.id || issue._id || '', status, selectedTeam);
+    await onUpdateStatus(issue.id || issue._id || '', status, selectedTeam, { assignedUserId: status === 'ASSIGNED' ? staffId || undefined : undefined, resolutionNotes: status === 'RESOLVED' ? resolutionNotes : undefined });
     setIsUpdating(false);
   };
 
@@ -216,7 +227,7 @@ export function IssueDetailModal({ issue, onClose, onUpdateStatus }: IssueDetail
       </div>
 
       {/* Footer Action Buttons */}
-      <div className="pt-4 border-t border-slate-800 space-y-2">
+      {user && ['admin', 'municipal_staff'].includes(user.role) ? <div className="pt-4 border-t border-slate-800 space-y-2">
         <label className="text-xs text-slate-400 block mb-1">Assign Response Team:</label>
         <select
           value={selectedTeam}
@@ -228,6 +239,9 @@ export function IssueDetailModal({ issue, onClose, onUpdateStatus }: IssueDetail
           <option value="Water & Sewage Response Team Delta">Water & Sewage Response Team Delta</option>
           <option value="Municipal Sanitation Squad 4">Municipal Sanitation Squad 4</option>
         </select>
+
+        {user?.role === 'admin' ? <label className="text-xs text-slate-400 block">Assign Staff Member:<select value={staffId} onChange={(event) => setStaffId(event.target.value)} className="mt-1 w-full bg-slate-900 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs"> <option value="">Select staff (optional)</option>{staff.filter((item) => item.isActive).map((item) => <option key={item.id} value={item.id}>{item.name}{item.department ? ` · ${item.department}` : ''}</option>)}</select></label> : user?.role === 'municipal_staff' && <p className="text-[10px] text-slate-400">Assigning this issue will assign it to your account{user.department ? ` · ${user.department}` : ''}.</p>}
+        <label className="text-xs text-slate-400 block">Resolution notes<textarea maxLength={3000} rows={2} value={resolutionNotes} onChange={(event) => setResolutionNotes(event.target.value)} placeholder="Record work completed or evidence notes" className="mt-1 w-full resize-y bg-slate-900 border border-slate-800 text-slate-200 rounded-xl p-3 text-xs" /></label>
 
         <div className="grid grid-cols-3 gap-2 pt-2">
           <button
@@ -252,7 +266,7 @@ export function IssueDetailModal({ issue, onClose, onUpdateStatus }: IssueDetail
             <CheckCircle2 className="w-3.5 h-3.5" /> Resolve
           </button>
         </div>
-      </div>
+      </div> : <p className="pt-4 border-t border-slate-800 text-xs text-slate-400">Public read-only demo · municipal workflow controls require an authorized staff session.</p>}
     </div>
   );
 }

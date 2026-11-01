@@ -2,8 +2,11 @@ import React, { useRef, useState } from 'react';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { useNavigate } from 'react-router-dom';
-import { api, AIVisionResult } from '../services/api';
+import { api, AIVisionResult, IDuplicateCheckResult } from '../services/api';
 import { IssueType, IssueSeverity } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { MapContainer, Marker, TileLayer, useMapEvents } from 'react-leaflet';
+import { LatLngExpression } from 'leaflet';
 import {
   Camera,
   MapPin,
@@ -17,14 +20,26 @@ import {
   Search,
 } from 'lucide-react';
 
+function LocationClick({ onSelect }: { onSelect: (lat: number, lng: number) => void }) {
+  useMapEvents({ click(event) { onSelect(event.latlng.lat, event.latlng.lng); } });
+  return null;
+}
+
 export function CitizenReportPage() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const idempotencyKey = useRef(crypto.randomUUID());
   const submissionFingerprint = useRef('');
 
   const [issueType, setIssueType] = useState<IssueType>('Pothole');
   const [description, setDescription] = useState('');
-  const [streetName, setStreetName] = useState('Sector 4 Road');
+  const [streetName, setStreetName] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [duplicateCheckResult, setDuplicateCheckResult] = useState<IDuplicateCheckResult | null>(null);
+  const [duplicateConfirmation, setDuplicateConfirmation] = useState(false);
+  const [duplicateCheckFingerprint, setDuplicateCheckFingerprint] = useState('');
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [severity, setSeverity] = useState<IssueSeverity>('High');
   const [contactEmail, setContactEmail] = useState('');
 
@@ -91,10 +106,8 @@ export function CitizenReportPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!description.trim()) return;
-
+  const performSubmit = async () => {
+    if (latitude === null || longitude === null) { setErrorMsg('Select the issue location on the map or use your current location.'); return; }
     setIsSubmitting(true);
     setErrorMsg('');
 
@@ -110,8 +123,8 @@ export function CitizenReportPage() {
     formData.append('streetName', streetName);
     formData.append('severity', severity);
     formData.append('contactEmail', contactEmail);
-    formData.append('latitude', '12.9716');
-    formData.append('longitude', '77.5946');
+    formData.append('latitude', String(latitude));
+    formData.append('longitude', String(longitude));
 
     if (selectedFile) {
       formData.append('photo', selectedFile);
@@ -126,6 +139,31 @@ export function CitizenReportPage() {
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : 'Report submission failed.');
     } finally { setIsSubmitting(false); }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) { setErrorMsg('This public demo is read-only. You can try image analysis, but complaint submission requires an authorized citizen account.'); return; }
+    if (!description.trim() || latitude === null || longitude === null) { setErrorMsg('Describe the issue and select its exact location before submitting.'); return; }
+    setErrorMsg(''); setCheckingDuplicates(true); setDuplicateCheckResult(null); setDuplicateConfirmation(false);
+    try {
+      let imageHash: string | undefined;
+      if (selectedFile && crypto.subtle) {
+        const digest = await crypto.subtle.digest('SHA-256', await selectedFile.arrayBuffer());
+        imageHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+      }
+      const duplicateCheck = await api.checkReportDuplicates({ issueType, description: description.trim(), latitude, longitude, imageHash });
+      if (duplicateCheck.hasPossibleDuplicates) { setDuplicateCheckResult(duplicateCheck); setDuplicateCheckFingerprint(JSON.stringify([issueType, description.trim(), latitude, longitude, selectedFile?.name, selectedFile?.size, selectedFile?.lastModified])); setDuplicateConfirmation(true); return; }
+      await performSubmit();
+    } catch (error) { setErrorMsg(error instanceof Error ? `Could not check nearby complaints: ${error.message}` : 'Could not check nearby complaints. Please retry.'); }
+    finally { setCheckingDuplicates(false); }
+  };
+
+  const useCurrentLocation = () => {
+    if (!navigator.geolocation) { setErrorMsg('Location access is unavailable. Select your location on the map.'); return; }
+    navigator.geolocation.getCurrentPosition((position) => {
+      setLatitude(position.coords.latitude); setLongitude(position.coords.longitude); setErrorMsg('');
+    }, () => setErrorMsg('Location permission was not granted. Select your location on the map or enter coordinates manually.'), { enableHighAccuracy: true, timeout: 10000 });
   };
 
   return (
@@ -143,10 +181,11 @@ export function CitizenReportPage() {
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-100">Report an Infrastructure Issue</h1>
             <p className="text-xs sm:text-sm text-slate-400">
-              Upload a photo or detail street damage. Our AI Priority Engine will analyze the report, assign tracking ID, and alert response crews.
+              {user ? 'Upload a photo or detail street damage. Our AI Priority Engine will analyze the report and provide a tracking ID after submission.' : 'Explore AI issue detection with a photo. Complaint submission is disabled in this public read-only demo.'}
             </p>
           </div>
 
+          {!user && <div role="status" className="p-4 rounded-xl border border-amber-700 bg-amber-950/30 text-xs text-amber-200">Read-only demo: image analysis is available. Creating complaints and updating their status remain restricted to authorized accounts.</div>}
           {submittedReportId ? (
             /* Success Screen */
             <div className="glass-panel-glow p-8 rounded-2xl text-center space-y-6 max-w-xl mx-auto border border-cyan-500/40">
@@ -314,6 +353,25 @@ export function CitizenReportPage() {
                   </div>
                 </div>
 
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-semibold text-slate-300">Exact issue location (required):</label>
+                    <button type="button" onClick={useCurrentLocation} className="px-3 py-2 rounded-lg border border-cyan-800 bg-cyan-950/50 text-cyan-200 text-[11px] font-semibold">Use my current location</button>
+                  </div>
+                  <div className="h-48 rounded-xl overflow-hidden border border-slate-800">
+                    <MapContainer center={([12.9716, 77.5946] as LatLngExpression)} zoom={12} scrollWheelZoom className="h-full w-full">
+                      <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                      <LocationClick onSelect={(lat, lng) => { setLatitude(lat); setLongitude(lng); }} />
+                      {latitude !== null && longitude !== null && <Marker position={[latitude, longitude]} />}
+                    </MapContainer>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Click the map to select the issue. Bengaluru is only the initial map view; no coordinates are submitted until selected.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-[10px] text-slate-400">Latitude<input type="number" step="any" min="-90" max="90" value={latitude ?? ''} onChange={(event) => setLatitude(event.target.value === '' ? null : Number(event.target.value))} className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-800 p-2 text-xs text-slate-100" /></label>
+                    <label className="text-[10px] text-slate-400">Longitude<input type="number" step="any" min="-180" max="180" value={longitude ?? ''} onChange={(event) => setLongitude(event.target.value === '' ? null : Number(event.target.value))} className="mt-1 w-full rounded-lg bg-slate-900 border border-slate-800 p-2 text-xs text-slate-100" /></label>
+                  </div>
+                </div>
+
                 {/* Description */}
                 <div>
                   <label className="text-xs font-semibold text-slate-300 block mb-1.5">Detailed Description:</label>
@@ -340,21 +398,29 @@ export function CitizenReportPage() {
                 </div>
               </div>
 
+              {user && duplicateConfirmation && duplicateCheckResult && <div role="alert" className="p-4 rounded-xl border border-amber-700 bg-amber-950/40 space-y-3">
+                <p className="text-sm font-bold text-amber-200">Possible existing complaints nearby</p>
+                <p className="text-xs text-slate-200">A recent report in this category may be nearby and similar.</p>
+                {duplicateCheckResult.aiReview && <p className="text-xs text-amber-100">AI review: {duplicateCheckResult.aiReview === 'possible_match' ? 'possible match suggested' : duplicateCheckResult.aiReview === 'no_likely_match' ? 'no likely match suggested' : duplicateCheckResult.aiReview === 'uncertain' ? 'uncertain; please use your judgment' : 'temporarily unavailable; this warning is based on nearby report evidence'}.</p>}
+                <p className="text-[11px] text-amber-100">To protect other residents’ privacy, their report IDs and exact locations are not shown. Your complaint will be submitted and tracked separately. Municipal staff review and confirm any links.</p>
+                <button type="button" disabled={isSubmitting} onClick={() => { const current = JSON.stringify([issueType, description.trim(), latitude, longitude, selectedFile?.name, selectedFile?.size, selectedFile?.lastModified]); setDuplicateConfirmation(false); if (current !== duplicateCheckFingerprint) { setErrorMsg('Complaint details changed. Check for possible duplicates again before submitting.'); return; } void performSubmit(); }} className="px-4 py-2 rounded-lg bg-amber-400 text-slate-950 text-xs font-bold disabled:opacity-50">Continue and submit my complaint</button>
+              </div>}
+
               {/* Submit Button */}
-              <button
+              {user && <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || checkingDuplicates || isScanning}
                 className="w-full py-4 bg-cyan-500 hover:bg-cyan-400 text-black font-extrabold text-sm rounded-2xl transition shadow-xl shadow-cyan-500/25 flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
-                  <span>Submitting Report...</span>
+                  <span>{checkingDuplicates ? 'Checking nearby complaints…' : 'Submitting Report...'}</span>
                 ) : (
                   <>
                     <CheckCircle2 className="w-5 h-5" />
                     <span>Submit Citizen Report to NagarDrishti</span>
                   </>
                 )}
-              </button>
+              </button>}
             </form>
           )}
         </main>

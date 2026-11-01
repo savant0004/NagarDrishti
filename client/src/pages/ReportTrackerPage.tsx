@@ -9,12 +9,13 @@ import { Search, CheckCircle2, Clock, ShieldCheck, Sparkles, MapPin, AlertCircle
 
 export function ReportTrackerPage() {
   const [searchParams] = useSearchParams();
-  const initialId = searchParams.get('id') || 'ST-2026-00482';
+  const initialId = searchParams.get('id') || '';
 
   const [inputReportId, setInputReportId] = useState(initialId);
   const [report, setReport] = useState<ICitizenReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [evidenceUrls, setEvidenceUrls] = useState<string[]>([]);
 
   const fetchReport = async (id: string) => {
     setIsLoading(true);
@@ -40,6 +41,16 @@ export function ReportTrackerPage() {
     socket.on('report:created', update);
     return () => { socket.off('report:updated', update); socket.off('report:created', update); };
   }, [inputReportId]);
+
+  useEffect(() => {
+    let active = true;
+    const urls: string[] = [];
+    if (report?.resolutionEvidence?.length) Promise.all(report.resolutionEvidence.map((path) => api.downloadResolutionEvidence(report.reportId, path)))
+      .then((items) => { urls.push(...items); if (active) setEvidenceUrls(items); else items.forEach((url) => URL.revokeObjectURL(url)); })
+      .catch(() => { if (active) setEvidenceUrls([]); });
+    else setEvidenceUrls([]);
+    return () => { active = false; urls.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [report?.reportId, report?.resolutionEvidence?.length]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,6 +216,8 @@ export function ReportTrackerPage() {
                   <div className="glass-panel p-6 rounded-2xl text-xs text-amber-300">Image analysis was unavailable when this report was submitted. This report was manually categorized and requires review.</div>
                 )}
               </div>
+              {!!report.history?.length && <section className="glass-panel p-5 rounded-2xl space-y-3 border border-slate-800"><h3 className="text-xs uppercase tracking-wider font-bold text-cyan-300">Complaint history</h3><ol className="space-y-2">{[...report.history].reverse().slice(0, 12).map((event, index) => <li key={`${event.createdAt}-${index}`} className="flex justify-between gap-4 text-xs"><span className="text-slate-200">{event.action.replace(/_/g, ' ')}{event.note ? ` · ${event.note}` : ''}</span><time className="shrink-0 text-[10px] text-slate-500">{new Date(event.createdAt).toLocaleString()}</time></li>)}</ol></section>}
+              {!!evidenceUrls.length && <section className="glass-panel p-5 rounded-2xl border border-slate-800"><h3 className="text-xs uppercase tracking-wider font-bold text-cyan-300 mb-3">Municipal resolution evidence</h3><div className="flex flex-wrap gap-3">{evidenceUrls.map((url, index) => <img key={`${url}-${index}`} src={url} alt={`Resolution evidence ${index + 1}`} className="max-h-40 max-w-full rounded-lg border border-slate-700 object-cover" />)}</div></section>}
             </div>
           )}
         </main>

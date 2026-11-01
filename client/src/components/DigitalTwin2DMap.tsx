@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { IIssue, IStreet } from '../types';
+import { IIssue, IStreet, ICitizenReport } from '../types';
 import { Layers, Map, Eye, Globe, Compass, Users } from 'lucide-react';
 
 interface DigitalTwin2DMapProps {
@@ -10,6 +10,7 @@ interface DigitalTwin2DMapProps {
   selectedIssue: IIssue | null;
   onSelectIssue: (issue: IIssue) => void;
   rainfallSimulation?: number;
+  reports?: ICitizenReport[];
 }
 
 type MapTheme = 'dark' | 'satellite' | 'street';
@@ -137,7 +138,7 @@ function MapRecenter({ selectedIssue }: { selectedIssue: IIssue | null }) {
   return null;
 }
 
-export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue, rainfallSimulation = 0 }: DigitalTwin2DMapProps) {
+export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue, rainfallSimulation = 0, reports = [] }: DigitalTwin2DMapProps) {
   const [mapTheme, setMapTheme] = useState<MapTheme>('dark');
   const [showLegend, setShowLegend] = useState<boolean>(true);
   const [tileError, setTileError] = useState('');
@@ -276,6 +277,14 @@ export function DigitalTwin2DMap({ issues, streets, selectedIssue, onSelectIssue
           ];
 
           return <Polyline key={`street-line-${idx}`} positions={lineCoords} pathOptions={lineProps} />;
+        })}
+
+        {/* Individual citizen reports retain their submitted coordinates. */}
+        {reports.filter((report) => Number.isFinite(report.latitude) && Number.isFinite(report.longitude)).slice(0, 500).map((report) => {
+          const color = report.severity === 'Critical' ? '#ef4444' : report.severity === 'High' ? '#f59e0b' : report.severity === 'Medium' ? '#eab308' : '#22c55e';
+          return <CircleMarker key={`report-${report.reportId}`} center={[report.latitude, report.longitude]} radius={5} pathOptions={{ color: '#f8fafc', weight: 1, fillColor: color, fillOpacity: 0.9 }}>
+            <Popup><div className="p-1 space-y-1"><strong className="text-xs">{report.reportId}</strong><p className="text-xs">{report.issueType} · {report.severity}</p><p className="text-xs">{report.streetName} · {report.status}</p></div></Popup>
+          </CircleMarker>;
         })}
 
         {/* Issue Pins */}

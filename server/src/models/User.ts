@@ -7,6 +7,8 @@ export interface IUser extends Document {
   email: string;
   passwordHash: string;
   role: UserRole;
+  department?: string;
+  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -16,6 +18,8 @@ const UserSchema = new Schema<IUser>({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },
   passwordHash: { type: String, required: true, select: false },
   role: { type: String, required: true, enum: ['citizen', 'municipal_staff', 'admin'], default: 'citizen' },
+  department: { type: String, trim: true, maxlength: 100, default: '' },
+  isActive: { type: Boolean, default: true, index: true },
 }, { timestamps: true });
 
 export const UserModel = mongoose.model<IUser>('User', UserSchema);

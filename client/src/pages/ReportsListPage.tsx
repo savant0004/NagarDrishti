@@ -5,7 +5,7 @@ import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 import { ICitizenReport } from '../types';
 import { Link } from 'react-router-dom';
-import { FileText, Search, Clock, ExternalLink, Plus, Filter } from 'lucide-react';
+import { FileText, Search, Clock, ExternalLink, Plus, Filter, UploadCloud, Link2 } from 'lucide-react';
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -43,6 +43,8 @@ export function ReportsListPage() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [errorMsg, setErrorMsg] = useState('');
+  const [uploadingReportId, setUploadingReportId] = useState('');
+  const [linkingReportId, setLinkingReportId] = useState('');
 
   useEffect(() => {
     async function load() {
@@ -67,6 +69,23 @@ export function ReportsListPage() {
   });
 
   const statuses = ['ALL', 'Submitted', 'Under Review', 'Assigned', 'In Progress', 'Resolved'];
+  const uploadEvidence = async (reportId: string, file?: File) => {
+    if (!file) return;
+    setUploadingReportId(reportId); setErrorMsg('');
+    try { const updated = await api.uploadResolutionEvidence(reportId, file); setReports((items) => items.map((item) => item.reportId === reportId ? updated : item)); }
+    catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Evidence upload failed.'); }
+    finally { setUploadingReportId(''); }
+  };
+  const linkDuplicate = async (sourceReportId: string, targetReportId: string) => {
+    const confirmed = window.confirm(`Confirm that ${sourceReportId} and ${targetReportId} are duplicate complaints? Both citizen reports will remain available; staff will manage them under one issue.`);
+    if (!confirmed) return;
+    setLinkingReportId(sourceReportId); setErrorMsg('');
+    try {
+      await api.linkDuplicateReports(sourceReportId, targetReportId);
+      setReports(await api.getReports());
+    } catch (error) { setErrorMsg(error instanceof Error ? error.message : 'Duplicate complaints could not be linked.'); }
+    finally { setLinkingReportId(''); }
+  };
 
   return (
     <div className="flex h-screen w-screen bg-[#060a12] text-slate-100 overflow-hidden">
@@ -186,6 +205,8 @@ export function ReportsListPage() {
                       >
                         Track <ExternalLink className="w-3 h-3" />
                       </Link>
+                      <label className={`ml-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-700 text-[10px] text-slate-300 cursor-pointer hover:border-cyan-700 ${uploadingReportId === r.reportId ? 'opacity-50 pointer-events-none' : ''}`} title="Upload municipal resolution evidence"><UploadCloud className="w-3 h-3" />{uploadingReportId === r.reportId ? 'Uploading' : 'Evidence'}<input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={!!uploadingReportId} onChange={(event) => { void uploadEvidence(r.reportId, event.target.files?.[0]); event.currentTarget.value = ''; }} /></label>
+                      {r.possibleDuplicateReportIds?.filter((candidateId) => candidateId !== r.reportId && !r.duplicateLinkedReportIds?.includes(candidateId)).map((candidateId) => <button key={candidateId} type="button" disabled={!!linkingReportId} onClick={() => void linkDuplicate(r.reportId, candidateId)} className="ml-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-amber-800 text-[10px] text-amber-200 hover:bg-amber-950 disabled:opacity-50"><Link2 className="w-3 h-3" />{linkingReportId === r.reportId ? 'Linking' : 'Review link'}</button>)}
                     </td>
                   </tr>
                 ))}

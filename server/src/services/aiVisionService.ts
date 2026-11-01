@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { IssueSeverity, IssueType } from '../models/Issue';
+import { getGroqClient, getGroqErrorStatus, getGroqVisionModel, isGroqTimeout } from './groqClient';
 
 export type AICategory = IssueType | 'Other Urban Infrastructure' | 'No Identifiable Urban Issue';
 export interface AIVisionResult {
@@ -19,7 +20,7 @@ export interface AIVisionResult {
 
 export class VisionAnalysisError extends Error {
   constructor(
-    public readonly kind: 'not_configured' | 'provider_unavailable' | 'invalid_response' | 'invalid_image' | 'rate_limited' | 'provider_rejected' | 'timeout',
+    public readonly kind: 'not_configured' | 'provider_unavailable' | 'model_unavailable' | 'invalid_response' | 'invalid_image' | 'rate_limited' | 'provider_rejected' | 'timeout',
     message: string,
     public readonly providerStatus?: number,
   ) {
@@ -28,7 +29,6 @@ export class VisionAnalysisError extends Error {
   }
 }
 
-const DEFAULT_MODEL_ID = 'qwen/qwen3.8-27b';
 const categories: AICategory[] = [
   'Pothole', 'Garbage Accumulation', 'Waterlogging', 'Blocked Drainage', 'Road Damage',
   'Broken Streetlight', 'Water Leakage', 'Other Urban Infrastructure', 'No Identifiable Urban Issue',
@@ -89,10 +89,10 @@ export function getCachedImageAnalysis(buffer: Buffer, mimeType: string): AIVisi
 }
 
 function providerError(status: number): VisionAnalysisError {
-  if (status === 401 || status === 403) {
-    return new VisionAnalysisError('provider_rejected', `Image analysis credentials were rejected by Groq (HTTP ${status}). You can still submit the report manually.`, status);
-  }
+  if (status === 401) return new VisionAnalysisError('provider_rejected', 'Groq rejected the configured API key (HTTP 401). You can still submit the report manually.', status);
+  if (status === 403) return new VisionAnalysisError('provider_rejected', 'Groq denied access to the configured vision model (HTTP 403). You can still submit the report manually.', status);
   if (status === 429) return new VisionAnalysisError('rate_limited', 'Image analysis is temporarily rate limited. You can still submit the report manually.', status);
+  if (status === 400 || status === 404) return new VisionAnalysisError('model_unavailable', 'The configured Groq vision model is unavailable or not enabled. You can still submit the report manually.', status);
   if (status >= 500) return new VisionAnalysisError('provider_unavailable', 'Groq image analysis is temporarily unavailable. You can still submit the report manually.', status);
   return new VisionAnalysisError('provider_unavailable', 'Groq could not process this image request. You can still submit the report manually.', status);
 }
@@ -103,17 +103,12 @@ export async function analyzeUploadedImage(buffer: Buffer, mimeType: string): Pr
   const cached = getCachedImageAnalysis(buffer, mimeType);
   if (cached) return cached;
 
-  const apiKey = process.env.GROQ_API_KEY?.trim();
-  if (!apiKey) throw new VisionAnalysisError('not_configured', 'Groq image analysis is not configured. You can still submit a manually categorized report.');
+  if (!process.env.GROQ_API_KEY?.trim()) throw new VisionAnalysisError('not_configured', 'Groq image analysis is not configured. You can still submit a manually categorized report.');
 
-  const modelIdentifier = process.env.GROQ_MODEL?.trim() || DEFAULT_MODEL_ID;
-  let response: Response;
+  const modelIdentifier = getGroqVisionModel();
+  let completion;
   try {
-    response = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(30_000),
-      body: JSON.stringify({
+    completion = await getGroqClient().chat.completions.create({
         model: modelIdentifier,
         messages: [{
           role: 'user',
@@ -126,29 +121,21 @@ export async function analyzeUploadedImage(buffer: Buffer, mimeType: string): Pr
         temperature: 0.1,
         max_completion_tokens: 900,
         reasoning_effort: 'none',
-      }),
     });
   } catch (error: unknown) {
-    const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-    console.error(`Groq image analysis request failed${timedOut ? ' (timeout)' : ' (network error)'}.`);
+    const status = getGroqErrorStatus(error);
+    const timedOut = isGroqTimeout(error);
+    console.error(JSON.stringify({ level: 'error', event: 'groq_image_request_failed', ...(status ? { status } : {}), ...(timedOut ? { reason: 'timeout' } : {}) }));
+    if (status) throw providerError(status);
     throw new VisionAnalysisError(timedOut ? 'timeout' : 'provider_unavailable', timedOut
       ? 'Image analysis timed out. You can still submit the report manually.'
       : 'Groq image analysis is temporarily unavailable. You can still submit the report manually.');
   }
 
-  if (!response.ok) {
-    console.error(`Groq image analysis request failed (HTTP ${response.status}).`);
-    throw providerError(response.status);
-  }
-
   try {
-    const payload: unknown = await response.json();
-    if (!payload || typeof payload !== 'object') throw new Error('Invalid completion response');
-    const choices = (payload as { choices?: unknown }).choices;
-    if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== 'object') throw new Error('Missing completion choice');
-    const message = (choices[0] as { message?: unknown }).message;
-    if (!message || typeof message !== 'object' || typeof (message as { content?: unknown }).content !== 'string') throw new Error('Missing JSON content');
-    const parsed: unknown = JSON.parse((message as { content: string }).content);
+    const content = completion.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) throw new Error('Missing JSON content');
+    const parsed: unknown = JSON.parse(content);
     const validated = validateModelPayload(parsed);
     const result: AIVisionResult = { ...validated, provider: 'Groq', modelIdentifier, analyzedAt: new Date() };
     const key = cacheKey(buffer, mimeType);

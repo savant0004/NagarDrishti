@@ -20,6 +20,23 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   });
 }
 
+export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
+  void (async () => {
+    const authorization = req.header('authorization') || '';
+    if (!authorization) return next();
+    const token = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    const payload = token ? verifyToken(token) : null;
+    if (!payload) return res.status(401).json({ success: false, code: 'INVALID_AUTH', error: 'Your session is invalid or expired.' });
+    const user = await getUserById(payload.sub);
+    if (!user) return res.status(401).json({ success: false, code: 'INVALID_AUTH', error: 'Your account is no longer available.' });
+    (req as AuthenticatedRequest).authUser = user;
+    next();
+  })().catch((error: unknown) => {
+    const unavailable = error instanceof AuthServiceError && error.code === 'DATABASE_UNAVAILABLE';
+    return res.status(unavailable ? 503 : 500).json({ success: false, code: unavailable ? 'DATABASE_UNAVAILABLE' : 'AUTH_ERROR', error: unavailable ? 'Authentication is temporarily unavailable.' : 'Authentication failed.' });
+  });
+}
+
 export function requireRole(...roles: PublicUser['role'][]): (req: Request, res: Response, next: NextFunction) => void {
   return (req, res, next) => {
     const user = (req as AuthenticatedRequest).authUser;

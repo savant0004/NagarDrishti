@@ -1,419 +1,438 @@
 <div align="center">
 
-<h1>
-  <img src="https://img.shields.io/badge/🏙️-NAGARDRISHTI-00f2fe?style=for-the-badge&labelColor=060a12&color=00f2fe" />
-</h1>
+# 🏙️ NagarDrishti
 
-<h3>
-  <strong>AI-Powered Urban Digital Twin — Smart City Infrastructure Intelligence Platform</strong>
-</h3>
+### AI-Powered Urban Intelligence & Digital Twin Platform
 
-<p><em>"A Smarter Vision for Every Street."</em></p>
+**See the city. Understand its problems. Prioritize action. Build smarter infrastructure.**
 
-<br/>
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react\&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript\&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-339933?logo=node.js\&logoColor=white)](https://nodejs.org/)
+[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?logo=mongodb\&logoColor=white)](https://www.mongodb.com/)
+[![Groq](https://img.shields.io/badge/AI-Groq-orange)](https://groq.com/)
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-18-61dafb?style=flat-square&logo=react&logoColor=black)](https://reactjs.org/)
-[![Three.js](https://img.shields.io/badge/Three.js-3D_Engine-white?style=flat-square&logo=three.js&logoColor=black)](https://threejs.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-Express-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Socket.IO](https://img.shields.io/badge/Socket.IO-Real--Time-010101?style=flat-square&logo=socket.io&logoColor=white)](https://socket.io/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Live_or_Explicit_Demo-47a248?style=flat-square&logo=mongodb&logoColor=white)](https://mongodb.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
-
-<br/>
-
-> 🏆 **Built for Hackathon** · Full-Stack · Explicit demo and live modes
+**Built for Devengers Shinchan Hackathon 2026**
 
 </div>
 
 ---
 
-## 🌆 What is NagarDrishti?
+## 🌆 About the Project
 
-**NagarDrishti** (Hindi: *"City Vision"*) is a next-generation **urban infrastructure intelligence platform** that creates a real-time, interactive **digital twin** of a city's street network.
+NagarDrishti is an AI-powered urban infrastructure monitoring and management platform designed to help cities identify, visualize, prioritize and manage civic issues.
 
-Municipal authorities and field crews can **see every problem, understand its true risk, simulate future disasters, and resolve issues faster** — all from a single command center.
+Urban problems such as potholes, garbage accumulation, waterlogging, damaged roads and blocked drainage systems often go unnoticed or remain unresolved because information is scattered across different reporting systems.
 
-> 💡 **The Core Problem:** Cities receive hundreds of daily reports — potholes, blocked drains, broken lights. Without spatial context or data-driven prioritization, critical failures get missed until they become public disasters.
+NagarDrishti brings these workflows together through an interactive urban dashboard combining AI-powered image analysis, geospatial visualization, a 3D Digital Twin, complaint management and scenario-based flood simulation.
 
-> ✅ **The Solution:** NagarDrishti connects 2D GIS maps, 3D city models, AI priority scoring, citizen reports, real-time WebSocket updates, and a climate scenario simulator into a unified smart city command platform.
+The platform uses Bengaluru as its demonstration city.
 
----
+## ✨ Key Features
 
-## 🎯 Key Highlights
+### 1. AI-Powered Urban Issue Detection
 
-| Capability | Technology | What It Does |
-|-----------|-----------|--------------|
-| 🏙️ **3D Digital Twin** | Three.js · React Three Fiber | Interactive WebGL city with live issue markers, smoke particles, real-time HUD panels |
-| 🗺️ **2D GIS Mapping** | Leaflet · React-Leaflet | Color-coded risk markers, street health overlays, real Bengaluru coordinates |
-| 🤖 **AI Priority Engine** | Custom Algorithm | 7-factor weighted risk scoring — severity, population, infrastructure, traffic, weather |
-| ⛈️ **Scenario Simulator** | REST API + Live Map | "What If?" climate modeling — rainfall, drainage, traffic sliders with flood risk output |
-| 📱 **Citizen Reporter** | Groq Vision API | Photo upload → visually analyzes urban issues; unavailable analysis remains a manual report |
-| 📡 **Real-Time Updates** | Socket.IO WebSockets | Dashboard live-updates when issues are created or status changes |
-| 🏥 **Street Health Index** | Multi-metric Scoring | Per-street composite scores: Road · Drainage · Lighting · Sanitation · Traffic |
-| 📊 **Analytics Command** | Recharts | Issue velocity charts, risk distribution, category breakdown over time ranges |
-| 🔍 **Report Tracking** | Lifecycle Management | Citizens track their report ID through 5 resolution stages in real time |
+* Upload photographs of urban infrastructure problems.
+* Analyze actual image content using Groq Vision.
+* Identify categories such as potholes, garbage, road damage and waterlogging.
+* Provide a manual reporting option when AI analysis is unavailable.
+* Keep AI credentials securely on the backend.
 
-### Groq image analysis configuration
+### 2. Interactive 2D City Map
 
-For backend image analysis, set `GROQ_API_KEY` in `server/.env` (see `server/.env.example`). The model defaults to `qwen/qwen3.8-27b`; override it with `GROQ_MODEL` if needed. Keep this key on the server. If Groq analysis is unavailable, reports can still be submitted with a citizen-selected category; those reports are marked `not_analyzed` for review.
+* Visualize reported urban issues geographically.
+* Explore issue locations and categories.
+* Understand the distribution of infrastructure problems.
+* Inspect issue details through interactive map elements.
 
-## Running demo and live mode
+### 3. 3D Digital Twin
 
-Use Node.js 20 or newer. Install dependencies with `npm install` in both `server` and `client`. Copy `server/.env.example` to the ignored `server/.env` and set a private `JWT_SECRET` of at least 32 bytes.
+* Explore a procedural 3D city environment.
+* Visualize urban infrastructure and issue locations.
+* Interact with the city through the dashboard.
+* Connect spatial visualization with issue monitoring.
 
-For the seeded Bengaluru demonstration, set `DEMO_MODE=true`, `DEMO_ADMIN_EMAIL`, and `DEMO_ADMIN_PASSWORD` (at least 12 characters). Demo records are in memory, tagged as sample data, and reset when the server restarts. Start the API with `cd server && npm run dev`; start the client in another terminal with `cd client && npm run dev`. While the demo API is running, `cd server && npm run seed` safely resets only its in-memory sample data.
+### 4. Flood Scenario Simulator
 
-For live records, set `DEMO_MODE=false` and provide `MONGODB_URI` for a local MongoDB or Atlas database. Live mode does not fall back to in-memory records. The first administrator can be provisioned with `npm run user:create-admin` from `server` after setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the ignored `server/.env`; the command refuses demo mode and will not overwrite an existing account. `/api/health` is liveness, while `/api/ready` reports whether required configuration and the active data store are ready.
+* Experiment with rainfall and drainage-related parameters.
+* Explore potential waterlogging scenarios.
+* Visualize affected areas and changing risk levels.
+* Generate scenario-based recommendations.
 
-The client uses `/api` and `/socket.io` through Vite's development proxy by default. Configure `VITE_API_URL` for a deployed API origin, and optionally `VITE_SOCKET_URL` for a separate Socket.IO origin. Do not put server secrets in `VITE_` variables.
+**Note:** This is a scenario simulator, not a real-time flood forecasting or government alert system.
 
-Backend checks run with `cd server && npm test` and `npm run build`. The frontend TypeScript check and production bundle run with `cd client && npm run build`.
+### 5. Smart Complaint Management
 
----
+* Submit civic complaints with supporting information and photographs.
+* Track submitted reports through their tracking IDs.
+* Monitor complaint status and resolution progress.
+* Maintain separate citizen reports even when potential duplicates are identified.
 
-## 🏗️ System Architecture
+### 6. AI-Assisted Duplicate Detection
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  NagarDrishti Platform                   │
-│                                                         │
-│  ┌──────────────────────┐   ┌─────────────────────────┐ │
-│  │     FRONTEND         │   │       BACKEND            │ │
-│  │  React 18 + Vite     │◄──►   Express + Socket.IO   │ │
-│  │  TypeScript          │   │   Node.js + TypeScript   │ │
-│  │  Tailwind CSS        │   │   Multer (uploads)       │ │
-│  │  Three.js / R3F      │   │   AI Vision Service      │ │
-│  │  Leaflet Maps        │   │                          │ │
-│  │  Recharts            │   └──────────┬───────────────┘ │
-│  └──────────────────────┘              │                  │
-│                                        ▼                  │
-│                              ┌─────────────────────┐     │
-│                              │   MongoDB            │     │
-│                              │   Live MongoDB or   │     │
-│                              │ Explicit Demo Store │     │
-│                              └─────────────────────┘     │
-└─────────────────────────────────────────────────────────┘
-```
+* Identify potentially related complaints.
+* Consider issue category, location, timestamps, text similarity and image evidence.
+* Keep duplicate suggestions advisory.
+* Require authorized staff confirmation before linking reports.
 
-### Tech Stack
+### 7. AI-Assisted Priority Management
 
-**Frontend**
-- React 18 + TypeScript + Vite
-- Tailwind CSS (utility-first design system)
-- Three.js + `@react-three/fiber` + `@react-three/drei` (3D engine)
-- Leaflet + React-Leaflet (2D GIS mapping)
-- Recharts (analytics charts)
-- Lucide React (icon system)
-- Socket.IO Client (real-time)
+* Evaluate infrastructure issues using multiple risk factors.
+* Help staff identify high-priority problems.
+* Present issue information to support better decisions.
 
-**Backend**
-- Node.js + Express.js + TypeScript
-- Socket.IO (WebSocket event hub)
-- Mongoose + MongoDB (primary database)
-- Explicit in-memory Bengaluru demo dataset (`DEMO_MODE=true`)
-- Multer (image upload processing)
-- Demo AI Vision Classification Service
+### 8. AI Assistant
 
----
+* Provide an AI-powered conversational interface.
+* Answer questions related to the platform and urban issues.
+* Use the backend Groq integration.
 
-## 🔑 Core Features In Depth
+### 9. Analytics Dashboard
 
-### 1. 🤖 AI Priority Scoring Engine
-Every urban issue gets an objective, explainable priority score (0–100):
+* Explore issue distributions and category breakdowns.
+* Monitor complaint and resolution information.
+* Understand infrastructure trends through visual analytics.
 
-```
-Priority Score = Σ(
-  Severity Weight    × severity_factor   [0–20]
-  Traffic Impact     × traffic_density   [0–20]
-  Population Impact  × residents_nearby  [0–20]
-  Infrastructure     × school/hospital   [0–15]
-  Citizen Reports    × report_count      [0–10]
-  Duration Risk      × days_unresolved   [0–10]
-  Weather Risk       × rainfall_forecast [0–5]
-)
-```
+### 10. Authentication and Staff Management
 
-No guesswork. No politics. **Data drives every dispatch decision.**
+* Secure user authentication.
+* Protected staff operations.
+* Role-based access to authorized actions.
+* Public read-only dashboard access.
+* Authenticated complaint submission and protected status updates.
 
-### 2. ⛈️ "What If?" Scenario Simulator
-Before a monsoon hits, city officials can model:
-- Set **Rainfall** to 160mm → Flood risk spikes to 81%
-- 6 streets turn to flood-risk overlay on the map
-- AI generates emergency recommendation: *"Deploy suction jetter on Sector 4 drainage — 3,240 residents at risk"*
+### 11. Notifications
 
-### 3. 🌐 Explicit Demo and Live Modes
-Set `DEMO_MODE=true` to serve clearly marked, seeded Bengaluru sample records from memory without requiring MongoDB. Set `DEMO_MODE=false` to serve only MongoDB records; if MongoDB is unavailable, the API reports an error instead of substituting sample data. The `/api/health` endpoint reports the active mode and database connection state.
-
-### 4. 📡 Real-Time WebSocket Hub
-- Socket.IO events: `issue:created`, `issue:updated`, `data:reseeded`
-- Dashboard updates live without page refresh
-- Multi-user ready — all connected clients see the same state
+* Provide notifications for relevant platform events.
+* Support communication around complaint and issue workflows.
 
 ---
 
-## 🚀 Quick Start
+## 🛠️ Technology Stack
 
-### Prerequisites
-- Node.js 18+ and npm
-- MongoDB for live mode (optional when using explicit demo mode)
-
-### Installation
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/yourusername/nagardrishti.git
-cd nagardrishti
-
-# 2. Install ALL dependencies (root + server + client) in one command
-npm run install:all
-
-# 3. Configure the backend environment
-copy .env.example server\.env
-# Keep DEMO_MODE=true for seeded sample data, or set it to false and configure MONGODB_URI for live records.
-
-# 4. Launch everything (frontend + backend simultaneously)
-npm run dev
-```
-
-### You're Live 🎉
-| Service | URL |
-|---------|-----|
-| 🌐 **Landing Page** | http://localhost:5173 |
-| 🏙️ **Command Dashboard** | http://localhost:5173/dashboard |
-| ⛈️ **Scenario Simulator** | http://localhost:5173/simulator |
-| 📊 **Analytics** | http://localhost:5173/analytics |
-| 🏥 **Street Health Index** | http://localhost:5173/street-health |
-| 📱 **Report a Problem** | http://localhost:5173/report |
-| 📋 **Reports Registry** | http://localhost:5173/reports-list |
-| 🔍 **Track My Report** | http://localhost:5173/tracker |
-| 🔌 **API Health Check** | http://localhost:5000/api/health |
+| Layer                   | Technologies                         |
+| ----------------------- | ------------------------------------ |
+| Frontend                | React 18, TypeScript, Vite           |
+| Styling                 | Tailwind CSS                         |
+| 2D Mapping              | Leaflet, React-Leaflet               |
+| 3D Visualization        | Three.js, React Three Fiber, Drei    |
+| Charts                  | Recharts                             |
+| Backend                 | Node.js, Express.js, TypeScript      |
+| Database                | MongoDB Atlas, Mongoose              |
+| AI                      | Groq API, Vision and language models |
+| Authentication          | JWT, bcrypt                          |
+| Real-time Communication | Socket.IO                            |
+| File Uploads            | Multer                               |
 
 ---
 
-## 📡 REST API Reference
+## 🏗️ Architecture
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/health` | System health check |
-| `GET` | `/api/issues` | Fetch all urban issues (priority sorted) |
-| `GET` | `/api/issues/:id` | Get single issue with full breakdown |
-| `POST` | `/api/issues` | Create new issue |
-| `PATCH` | `/api/issues/:id` | Update status / assign team |
-| `GET` | `/api/reports` | List all citizen reports |
-| `GET` | `/api/reports/:reportId` | Get report by tracking ID |
-| `POST` | `/api/reports` | Submit citizen report (multipart/form-data) |
-| `POST` | `/api/reports/analyze-image` | Run AI vision classification |
-| `GET` | `/api/streets` | Street health index directory |
-| `GET` | `/api/analytics` | Full analytics metrics |
-| `POST` | `/api/simulation` | Run "What If?" scenario model |
-| `POST` | `/api/seed` | Reseed demo data |
-
----
-
-## 🏆 Hackathon Demo Script
-
-**Recommended 4-minute walkthrough for judges:**
-
-```
-01. LANDING PAGE (/)
-    → Show 3D interactive city scene in the hero background
-    → Point out: "How It Works" pipeline, 9 platform capabilities
-
-02. COMMAND DASHBOARD (/dashboard)
-    → Show 2D GIS map with colored risk markers
-    → Click ISSUE-001 (Sector 4 Drain Blockage, Priority 87/100)
-    → Show: AI-explained priority breakdown, population impact
-    → Click "Assign Team" → live status updates via Socket.IO
-
-03. SCENARIO SIMULATOR (/simulator)
-    → Drag Rainfall slider to 160mm
-    → Watch: Flood Risk jumps to 81%, 6 streets affected
-    → Show AI auto-recommendation banner
-    → Switch to 3D view — see city react in real time
-
-04. REPORT A PROBLEM (/report)
-    → Upload any street/road photo
-    → Watch AI Vision Scanner classify issue (91% confidence)
-    → Submit → get ST-2026-XXXXX tracking ID
-
-05. TRACK REPORT (/tracker)
-    → Enter ST-2026-00482 → see 5-stage progress tracker
-
-06. STREET HEALTH INDEX (/street-health)
-    → Show Silk Board Junction (Score: 49 — Critical)
-    → Visual progress bars: Drainage 38%, Traffic 14%
-
-07. ANALYTICS (/analytics)
-    → Show charts: 8 active issues, 41,840 citizens impacted
-    → Incident velocity trend (resolved vs active)
+```text
+                  NagarDrishti
+                       |
+          +------------+------------+
+          |                         |
+       Frontend                  Backend
+          |                         |
+     React + Vite             Express + Node.js
+          |                         |
+     +----+-----+          +---------+----------+
+     |          |          |         |          |
+    2D Map    3D Twin     APIs     AI Services  Socket.IO
+     |          |          |         |          |
+     +----------+----------+---------+----------+
+                               |
+                         MongoDB Atlas
+                               |
+                       Persistent Records
 ```
 
----
+### Main application flow
 
-## 📦 Production Build
-
-```bash
-# Build both client (Vite) and server (TypeScript → JS)
-npm run build
-
-# Output locations:
-# Client: ./client/dist/
-# Server: ./server/dist/
-
-# Run production server
-node server/dist/server.js
-```
-
----
-
-## 🌍 Deployment Guide
-
-### Option A — Render.com (Recommended for Hackathon)
-
-1. **Backend** → New Web Service → Connect repo → Build: `cd server && npm install && npm run build` → Start: `node dist/server.js`
-2. **Frontend** → New Static Site → Build: `cd client && npm install && npm run build` → Publish: `client/dist`
-3. Set `VITE_API_URL` in client env vars to your backend Render URL
-
-### Option B — Railway
-
-```bash
-# Deploy backend
-railway init
-railway add --service backend
-railway variables set MONGODB_URI=<your_atlas_uri>
-railway up
-
-# Deploy frontend separately as a static site
-```
-
-### Option C — Vercel (Frontend) + Railway (Backend)
-
-```bash
-# Frontend (Vercel)
-vercel --prod
-
-# Backend (Railway or Fly.io)
-fly launch
-fly deploy
-```
-
-### ⚠️ Deployment Checklist
-
-- [ ] Set `DEMO_MODE=false` and configure `MONGODB_URI` for live records (or use `DEMO_MODE=true` for labeled sample data)
-- [ ] Set `CLIENT_URL` to your deployed frontend domain (for CORS)
-- [ ] Set `NODE_ENV=production`
-- [ ] Set `PORT=5000` (or let hosting platform assign)
-- [ ] Update `vite.config.ts` proxy target to production backend URL
+1. A citizen submits an infrastructure complaint.
+2. The backend processes the submitted information and image.
+3. AI image analysis assists with issue classification.
+4. The report and associated issue information are stored.
+5. The priority engine helps evaluate the issue.
+6. Staff review and manage complaints.
+7. Citizens can track their submitted reports.
 
 ---
 
 ## 📁 Project Structure
 
-```
-nagardrishti/
-├── 📄 package.json              # Root workspace scripts
-├── 📄 .env.example              # Environment configuration template
+```text
+NagarDrishti/
 │
-├── 📁 client/                   # React + Vite Frontend
+├── client/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── HeroCity3D.tsx   # 3D Digital Twin (Three.js)
-│   │   │   ├── DigitalTwin2DMap.tsx  # 2D GIS Map (Leaflet)
-│   │   │   ├── IssueDetailModal.tsx  # Issue inspector panel
-│   │   │   ├── Header.tsx       # Top navigation bar
-│   │   │   └── Sidebar.tsx      # Left navigation
+│   │   ├── contexts/
 │   │   ├── pages/
-│   │   │   ├── LandingPage.tsx  # Hero + How It Works + Features
-│   │   │   ├── DashboardPage.tsx # Command center (2D/3D toggle)
-│   │   │   ├── SimulatorPage.tsx # Scenario climate simulator
-│   │   │   ├── AnalyticsPage.tsx # Charts & KPI metrics
-│   │   │   ├── StreetHealthPage.tsx # Per-street health index
-│   │   │   ├── CitizenReportPage.tsx # Mobile report form + AI
-│   │   │   ├── ReportsListPage.tsx  # Reports registry table
-│   │   │   └── ReportTrackerPage.tsx # Tracking timeline
 │   │   ├── services/
-│   │   │   ├── api.ts           # REST API client
-│   │   │   └── socket.ts        # Socket.IO client
-│   │   └── types/               # TypeScript type definitions
+│   │   └── types/
+│   │
+│   ├── public/
+│   ├── .env.example
+│   └── package.json
 │
-└── 📁 server/                   # Node.js + Express Backend
-    └── src/
-        ├── server.ts            # Express app + Socket.IO hub
-        ├── controllers/         # Route handlers
-        ├── models/              # Mongoose schemas
-        ├── routes/              # API route definitions
-        ├── services/            # AI vision, priority engine
-        └── data/                # Seed data
+├── server/
+│   ├── src/
+│   │   ├── config.ts
+│   │   ├── controllers/
+│   │   ├── middleware/
+│   │   ├── models/
+│   │   ├── routes/
+│   │   ├── scripts/
+│   │   ├── services/
+│   │   └── server.ts
+│   │
+│   ├── scripts/
+│   ├── test/
+│   ├── .env.example
+│   └── package.json
+│
+├── .env.example
+├── .gitignore
+├── package.json
+└── README.md
 ```
 
 ---
 
-## 🔬 The AI Priority Engine — Explained
+## 🚀 Getting Started
 
-Unlike black-box ML models, NagarDrishti uses a **transparent, auditable scoring algorithm** that municipal officials can understand and trust:
+### Prerequisites
 
-```typescript
-function calculatePriorityScore(issue: IIssue): number {
-  const weights = {
-    severity:       { Critical: 20, High: 16, Medium: 10, Low: 4 },
-    traffic:        Math.min(20, issue.trafficVolume / 5),
-    population:     Math.min(20, issue.estimatedImpact / 500),
-    infrastructure: (schools * 5) + (hospitals * 5) + (busStops * 1),
-    reports:        Math.min(10, issue.reportsCount),
-    duration:       Math.min(10, issue.daysUnresolved * 2),
-    weather:        rainfall > 100 ? 5 : rainfall > 50 ? 3 : 0,
-  };
-  return Object.values(weights).reduce((sum, w) => sum + w, 0);
-}
-```
+Install:
 
-**Every score is fully explainable.** Judges see exactly WHY issue ISSUE-004 scores 89/100.
+* Node.js 20 or newer
+* npm
+* MongoDB local installation or MongoDB Atlas account
+* Groq API key for AI features
 
----
-
-## 👥 Target Users
-
-| User Type | How They Use NagarDrishti |
-|-----------|--------------------------|
-| 🏛️ **Municipal Authorities** | Monitor city-wide issues, dispatch crews, run disaster simulations |
-| 🚧 **Field Repair Crews** | View assigned tasks, update status, see exact GPS location |
-| 👤 **Citizens** | Report problems with photos, track resolution in real-time |
-| 📈 **City Planners** | Analyze trends, identify recurring hotspots, justify infrastructure budget |
-
----
-
-## 🤝 Contributing
-
-This is a hackathon project. Issues and PRs are welcome!
+### 1. Clone the repository
 
 ```bash
-# Fork the repo, create a branch
-git checkout -b feature/your-feature
+git clone https://github.com/savant0004/NagarDrishti.git
 
-# Make changes, commit
-git commit -m "feat: your feature description"
+cd NagarDrishti
+```
 
-# Push and open a PR
-git push origin feature/your-feature
+### 2. Install dependencies
+
+```bash
+npm run install:all
+```
+
+### 3. Configure the backend
+
+Copy the environment template:
+
+**Windows PowerShell**
+
+```powershell
+Copy-Item server/.env.example server/.env
+```
+
+Configure your backend environment variables:
+
+```env
+PORT=5000
+NODE_ENV=development
+
+DEMO_MODE=false
+
+MONGODB_URI=your_mongodb_connection_string
+MONGODB_DATABASE=nagardrishti
+
+JWT_SECRET=your_secure_random_secret
+
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_VISION_MODEL=qwen/qwen3.8-27b
+
+CLIENT_URL=http://localhost:5173
+```
+
+Use the database mode and environment variables required by your backend configuration.
+
+**Never commit your actual `.env` file or expose API credentials.**
+
+### 4. Configure the frontend
+
+Copy:
+
+```powershell
+Copy-Item client/.env.example client/.env.local
+```
+
+For local development, the Vite proxy handles API requests by default.
+
+For deployment, configure:
+
+```env
+VITE_API_URL=https://your-backend-domain.com
+```
+
+Do not put MongoDB credentials, JWT secrets or Groq API keys in frontend variables.
+
+### 5. Start the application
+
+From the project root:
+
+```bash
+npm run dev
+```
+
+The frontend and backend start together.
+
+| Service       | Local URL                        |
+| ------------- | -------------------------------- |
+| Frontend      | http://localhost:5173            |
+| Backend       | http://localhost:5000            |
+| API Health    | http://localhost:5000/api/health |
+| API Readiness | http://localhost:5000/api/ready  |
+
+---
+
+## 🗄️ Database Modes
+
+NagarDrishti supports two application modes.
+
+### Demo Mode
+
+```env
+DEMO_MODE=true
+```
+
+* Uses seeded Bengaluru demonstration records.
+* Does not require a live MongoDB connection.
+* Demonstration records are stored in memory.
+* Sample records reset when the server restarts.
+
+### Live Mode
+
+```env
+DEMO_MODE=false
+MONGODB_URI=your_mongodb_atlas_uri
+```
+
+* Uses MongoDB for persistent application records.
+* Does not silently substitute in-memory sample records when MongoDB is unavailable.
+* Requires a valid database connection.
+
+Demonstration records should not be presented as genuine citizen submissions.
+
+---
+
+## 🧪 Testing and Build
+
+### Backend tests
+
+```bash
+cd server
+npm test
+```
+
+### Backend production build
+
+```bash
+cd server
+npm run build
+```
+
+### Frontend production build
+
+```bash
+cd client
+npm run build
+```
+
+### Build the complete application
+
+From the root directory:
+
+```bash
+npm run build
 ```
 
 ---
+
+## 🌍 Deployment
+
+The application can be deployed using separate frontend and backend hosting.
+
+Suggested infrastructure:
+
+| Component   | Suggested Service            |
+| ----------- | ---------------------------- |
+| Frontend    | Vercel or Render Static Site |
+| Backend     | Render or Railway            |
+| Database    | MongoDB Atlas                |
+| AI Services | Groq API                     |
+
+### Production configuration checklist
+
+* Set `NODE_ENV=production`.
+* Set `DEMO_MODE=false`.
+* Configure the production MongoDB connection.
+* Configure a new secure JWT secret.
+* Configure the Groq API key on the backend.
+* Set `CLIENT_URL` to the deployed frontend domain.
+* Configure frontend API and Socket.IO URLs.
+* Ensure uploaded files use persistent storage.
+* Verify authentication, reporting, AI analysis and staff operations.
+
+---
+
+## 🔐 Security
+
+* Keep all private credentials in environment variables.
+* Never expose backend API keys to the browser.
+* Use strong JWT secrets.
+* Rotate credentials that have been exposed.
+* Restrict production CORS to trusted frontend domains.
+* Protect staff-only operations with authorization.
+* Avoid committing uploaded user files or private environment configurations.
+
+---
+
+## 🎯 Project Vision
+
+NagarDrishti aims to make urban infrastructure management more transparent, data-driven and responsive.
+
+By combining AI-assisted issue identification, geospatial visualization, digital twin technology and structured complaint management, the platform provides a unified foundation for smarter urban operations.
+
+### Future Scope
+
+* Integration with verified municipal datasets.
+* IoT-based infrastructure monitoring.
+* Advanced geospatial analytics.
+* Improved predictive maintenance.
+* Integration with official emergency and civic systems.
+
+These are future possibilities, not claims of currently implemented integrations.
+
+---
+
+## 👥 Contributors
+
+Developed as part of **Devengers Shinchan Hackathon 2026**.
 
 ## 📄 License
 
-MIT License — See [LICENSE](LICENSE) for details.
+This project is distributed under the MIT License, subject to the repository's included license file.
 
 ---
 
 <div align="center">
 
-**Built with ❤️ for smarter, safer cities.**
+### NagarDrishti
 
-*NagarDrishti — Where data meets the street.*
+**A Smarter Vision for Every Street.**
 
-[![Made with React](https://img.shields.io/badge/Made_with-React-61dafb?style=flat-square&logo=react)](https://reactjs.org)
-[![Powered by Three.js](https://img.shields.io/badge/Powered_by-Three.js-black?style=flat-square&logo=three.js)](https://threejs.org)
-[![Real-Time with Socket.IO](https://img.shields.io/badge/Real--Time-Socket.IO-010101?style=flat-square&logo=socket.io)](https://socket.io)
+*Think Like Shinchan. Create Fearlessly. Build Something Extraordinary!*
 
 </div>
