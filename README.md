@@ -17,6 +17,23 @@
 </div>
 
 ---
+## 🚀 Live Demo
+
+**🌐 Live Application (Frontend):**
+https://nagar-drishti-new.vercel.app
+
+**⚙️ Backend API:**
+https://nagardrishti-backend-2mms.onrender.com
+
+**💚 Backend Health Check:**
+https://nagardrishti-backend-2mms.onrender.com/api/health
+
+**🔍 Backend Readiness Check:**
+https://nagardrishti-backend-2mms.onrender.com/api/ready
+
+**📂 GitHub Repository:**
+https://github.com/savant0004/NagarDrishti
+
 
 ## 🌆 About the Project
 
